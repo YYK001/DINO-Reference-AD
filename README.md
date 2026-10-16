@@ -25,7 +25,9 @@ AeBAD-S 第二章真实扰动实验的代码同步仓库。
 python -B -m DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0.runner preflight --no-write
 ```
 
-原 DINOv3 官方代码、checkpoint、正式六项元数据、冻结 Source image MAD、原 Source memory 和数据集均由用户提供。使用对应的 `--data / --formal-dir / --image-state / --memory / --checkpoint / --dinov3` 参数指向已有资产。固定预检明确报告缺项；不能因缺项而重建冻结资产或调整参数。
+DINOv3 官方源码随仓库放在 `external_baselines/dinov3`，是本工具默认查找位置；不需要另行 clone 或安装该源码包。checkpoint、正式六项元数据、冻结 Source image MAD、原 Source memory 和数据集仍由用户提供。使用对应的 `--data / --formal-dir / --image-state / --memory / --checkpoint / --dinov3` 参数指向已有资产。固定预检明确报告缺项；不能因缺项而重建冻结资产或调整参数。
+
+Kaggle 更新代码后，官方源码路径为 `/kaggle/working/DINO-Reference-AD/external_baselines/dinov3`。此次同步仅提供源码，没有安装依赖、加载模型或执行实验；T4 显存适配和其他输入缺项仍需另行处理。
 
 后续顺序为：显式补缓存 → 冻结预测 → CPU 评价 → 独立原 CUDA/ADEval AUPRO。补缓存需要完整宿主所需的显存；本地能够做 CUDA 评价不等于能够运行完整模型。各步骤命令以工具 README 为准。
 
@@ -57,4 +59,6 @@ git pull --ff-only
 
 ## 第三方源码
 
-`external_baselines/SuperADD` 为必要宿主源码，其 [LICENSE](external_baselines/SuperADD/LICENSE)、[NOTICE](external_baselines/SuperADD/NOTICE)、[CITATION.cff](external_baselines/SuperADD/CITATION.cff) 和第三方声明保留原内容；适用原 CC BY-NC 4.0 等声明。DINOv3 官方代码和权重由用户按原授权另行取得。
+`external_baselines/SuperADD` 为必要宿主源码，其 [LICENSE](external_baselines/SuperADD/LICENSE)、[NOTICE](external_baselines/SuperADD/NOTICE)、[CITATION.cff](external_baselines/SuperADD/CITATION.cff) 和第三方声明保留原内容；适用原 CC BY-NC 4.0 等声明。
+
+`external_baselines/dinov3` 来自 [Meta 官方仓库](https://github.com/facebookresearch/dinov3)，保留原 Python 包、配置和附属源文件、hub 入口、依赖/构建清单、README、[LICENSE.md](external_baselines/dinov3/LICENSE.md) 与 [MODEL_CARD.md](external_baselines/dinov3/MODEL_CARD.md)。这些文件未经修改，适用 DINOv3 License Agreement；没有打包权重、上游 Git 历史、Notebook 和 CI。上游 commit 与逐文件 SHA-256 记录于 [UPSTREAM.json](external_baselines/dinov3/UPSTREAM.json)。该 commit 标识本次本地源码来源，尚未证明它与历史 AutoDL 提取时使用的源码版本完全相同；正式提取仍须通过冻结基线复核。
