@@ -152,4 +152,25 @@ args=(--project-root "$PROJECT_ROOT"
 
 精确 CPU sort 预算 illumination 约 5.01 GiB、view 约 6.70 GiB；另需解释器、地图及并行缓冲，建议可用 RAM≥12 GiB，资源不足直接失败，不降采样。默认 4 个、最多 8 个 CPU worker，内存有界；两域排序顺序进行。
 
-完整宿主补缓存要求空闲显存≥20 GiB、空闲 RAM≥12 GiB；仅 Q 检索要求空闲显存≥8 GiB。当前本地 GTX1650 4GiB 不可运行完整模型路径。原 AUPRO 独立阶段可使用较小显卡，默认 allocator 上限 1.5 GiB，OOM 明确失败不替换指标。当前没有新域真实耗时数据，不据旧 FastRef OT 耗时估算本工具。
+完整宿主补缓存默认准入门槛为空闲显存≥20 GiB、空闲 RAM≥12 GiB；仅 Q 检索要求空闲显存≥8 GiB。当前本地 GTX1650 4GiB 不可运行完整模型路径。原 AUPRO 独立阶段可使用较小显卡，默认 allocator 上限 1.5 GiB，OOM 明确失败不替换指标。当前没有新域真实耗时数据，不据旧 FastRef OT 耗时估算本工具。
+
+### Kaggle T4 显式尝试
+
+`--capture-min-free-vram-gib 14` 仅将模型加载前的空闲显存准入值改为14 GiB。默认仍为20；参数须有限且≥8。该值不是显存分配上限、实测峰值或能够运行的保证。完整 batch、640切窗、float32、TF32设置、Exact NN、支持集、memory、MAD 和复现容差全部不变，不分割原提取 batch、不自动混合精度、不自动切换后端或降级。仅 Q 检索的8 GiB门槛不受此参数影响。
+
+本次用户选择跳过额外单图测试，直接尝试完整补缓存；尚无本工具在T4上的真实运行结果。资源不足或实际OOM会停止本次调用，原错误和已登记逐图缓存保留，不自动重试。门槛、加载前空闲/总显存及无降级设置记录在 `cache_status.json` 的各次 `invocations[].resource_admission`；成功后环境文件记录实际显存峰值。续跑仍先核对所有旧哈希。
+
+```bash
+python -B -u -m DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0.runner capture \
+  --project-root /kaggle/working/DINO-Reference-AD \
+  --formal-dir /kaggle/input/datasets/yky2026/frozen/formal \
+  --image-state /kaggle/input/datasets/yky2026/frozen/image_calibration_state.json \
+  --data /kaggle/input/datasets/yky2026/aebad888/AeBAD/AeBAD_S \
+  --memory /kaggle/input/datasets/yky2026/temp1-pt/official_memory.pt \
+  --checkpoint /kaggle/input/datasets/yky2026/checkpoint-dinov3/dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth \
+  --dinov3 /kaggle/working/DINO-Reference-AD/external_baselines/dinov3 \
+  --cache-root /kaggle/working/aebad_segment_pair_t4_cache_v1 \
+  --domain both --device cuda:0 --capture-min-free-vram-gib 14
+```
+
+执行前确认目标 cache root 属于本次运行。此次 runner/capture 代码变更会产生新的 joint code identity，不更改 catalog、提取设置或正式资产哈希；旧版本 identity 下的产物不能混入。该参数本身是运行准入设置，每次调用分别记录；不依据异常标签或指标选择数值。双T4显存不会合并，当前命令为单进程、两域顺序补缓存。

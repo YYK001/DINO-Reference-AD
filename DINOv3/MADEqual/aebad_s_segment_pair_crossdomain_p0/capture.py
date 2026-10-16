@@ -49,7 +49,9 @@ def query_arrays(ctx,directory,record,sample):
     return arrays,meta
 
 
-def run(ctx,domains,*,device_name='cuda:0',query_features=None,support_features=None,reuse_root=None):
+def run(ctx,domains,*,device_name='cuda:0',query_features=None,support_features=None,reuse_root=None,capture_min_free_vram_gib=20):
+    from .runner import capture_vram_bytes
+    model_minimum=capture_vram_bytes(capture_min_free_vram_gib)
     root=ctx['paths']['cache_root'];started=time.perf_counter();state=ip.cache_state(ctx)
     # Validate all old hashes BEFORE creating/resetting any status.
     if not root.exists():
@@ -68,7 +70,9 @@ def run(ctx,domains,*,device_name='cuda:0',query_features=None,support_features=
             state['sources'][role]=checksum
     counters=dict(query_extraction_calls=0,support_extraction_calls=0,query_cache_reuses=0,
                   complete_capture_reuses=0,exact_source_calls=0,exact_target_calls=0)
-    invocation=dict(started_utc=datetime.now(timezone.utc).isoformat(),domains=list(domains),counts=counters,timing_seconds={})
+    invocation=dict(started_utc=datetime.now(timezone.utc).isoformat(),domains=list(domains),counts=counters,timing_seconds={},
+                    resource_admission=dict(model_min_free_VRAM_bytes=model_minimum,retrieval_only_min_free_VRAM_bytes=8*2**30,
+                                            batch_changed=False,precision_changed=False,automatic_fallback=False))
     state.setdefault('invocations',[]).append(invocation)
     def commit():
         state.update(tool=ip.TOOL,identity=ctx['identity'],status='partial_cache_verified',last_invocation_counts=counters)
@@ -119,8 +123,13 @@ def run(ctx,domains,*,device_name='cuda:0',query_features=None,support_features=
             device=torch.device(device_name)
             if device.type!='cuda' or not torch.cuda.is_available():raise RuntimeError('explicit capture requires CUDA; no CPU model fallback')
             device=torch.device('cuda',device.index if device.index is not None else torch.cuda.current_device());torch.cuda.set_device(device)
-            minimum=(20 if need_model else 8)*2**30
-            if torch.cuda.mem_get_info(device)[0]<minimum:raise MemoryError('insufficient free VRAM: model capture needs 20 GiB, retrieval-only needs 8 GiB; no reduced protocol')
+            minimum=model_minimum if need_model else 8*2**30
+            free_vram,total_vram=torch.cuda.mem_get_info(device)
+            invocation['resource_admission'].update(required_free_VRAM_bytes=minimum,free_VRAM_before_loading_bytes=int(free_vram),
+                                                    total_VRAM_bytes=int(total_vram),device=str(device),model_required=need_model)
+            commit()
+            print(f'[crossdomain admission] free={free_vram/2**30:.2f} GiB required={minimum/2**30:.2f} GiB; original batch/float32 unchanged',flush=True)
+            if free_vram<minimum:raise MemoryError(f'insufficient free VRAM: selected admission requires {minimum/2**30:g} GiB; no batch/precision reduction or fallback')
             if ip.common.available_ram()<12*2**30:raise MemoryError('capture needs 12 GiB free host RAM for full supports and host')
             original._seed_everything();torch.set_float32_matmul_precision('highest')
             torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=True

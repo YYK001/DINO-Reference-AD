@@ -139,7 +139,22 @@ class IntegrationTests(TemporaryCase):
     def test_trusted_Q_retrieval_only_with_explicit_Exact_boundary_mock(self):
         self._capture_boundary(True)
 
-    def _capture_boundary(self,reuse_Q):
+    def test_explicit_14_GiB_admission_accepts_14_46_GiB_without_protocol_changes(self):
+        self._capture_boundary(False,free_gib=14.46,model_min_gib=14)
+
+    def test_default_20_GiB_admission_still_rejects_T4_before_host_loading(self):
+        self._capture_boundary(False,free_gib=14.46,expect_failure=True)
+
+    def test_retrieval_only_keeps_8_GiB_floor_with_lower_model_admission(self):
+        self._capture_boundary(True,free_gib=7.99,model_min_gib=14,expect_failure=True)
+
+    def test_retrieval_only_does_not_require_model_20_GiB(self):
+        self._capture_boundary(True,free_gib=8)
+
+    def test_allocation_failure_keeps_prior_raw_and_does_not_retry_or_fallback(self):
+        self._capture_boundary(False,free_gib=14.46,model_min_gib=14,expect_failure=True,allocation_failure=True)
+
+    def _capture_boundary(self,reuse_Q,*,free_gib=100,model_min_gib=20,expect_failure=False,allocation_failure=False):
         # These mocks replace Torch/host/extraction/Exact only. CaptureLog,
         # identity, geometry_layer, NPZ provenance and CURRENT checks are real.
         ctx,raw=self.fixture();root=ctx['paths']['cache_root'];state=ip.read_json(root/'cache_status.json')
@@ -167,7 +182,7 @@ class IntegrationTests(TemporaryCase):
         torch=SimpleNamespace(__version__='MOCK_NOT_TORCH',version=SimpleNamespace(cuda='MOCK'),device=lambda *a:SimpleNamespace(type='cuda',index=0),
             set_float32_matmul_precision=lambda *a:None,backends=SimpleNamespace(cuda=SimpleNamespace(matmul=SimpleNamespace(allow_tf32=False)),cudnn=SimpleNamespace(allow_tf32=True)),
             inference_mode=nullcontext,from_numpy=Tensor,cuda=SimpleNamespace(is_available=lambda:True,current_device=lambda:0,set_device=lambda *a:None,
-                mem_get_info=lambda *a:(100*2**30,100*2**30),empty_cache=lambda:None,get_device_name=lambda *a:'MOCK_NO_GPU',max_memory_allocated=lambda *a:0,max_memory_reserved=lambda *a:0))
+                mem_get_info=lambda *a:(int(free_gib*2**30),100*2**30),empty_cache=lambda:None,get_device_name=lambda *a:'MOCK_NO_GPU',max_memory_allocated=lambda *a:0,max_memory_reserved=lambda *a:0))
         def load_memory(path,holder,**kwargs):holder.prototype_embeddings={l:('source',l,0) for l in m.LAYERS};return True
         original=SimpleNamespace(_seed_everything=lambda:None,_load_memory=load_memory,PROTOCOL_ID='mad_equal_aebad_s_target_fewshot_seed42_v1',
             _support_tensors=lambda f,device:{l:[('target',l,j) for j in range(1,9)] for l in m.LAYERS})
@@ -186,6 +201,7 @@ class IntegrationTests(TemporaryCase):
             patch_exec=SimpleNamespace(patch_size=640,patch_overlap=128,model_patch_size=16),evaluation_downscale=4,
             backbone=SimpleNamespace(dino=SimpleNamespace(training=False,parameters=lambda:[])))
         host=SimpleNamespace(load_host=mock.Mock(return_value=(model,torch.device('cuda'))))
+        if allocation_failure:host.load_host.side_effect=MemoryError('simulated model allocation OOM')
         def exact(q,bank):
             pool,l,j=bank;off=m.LAYERS.index(l)
             d,idx=(raw['source_distance'][off],raw['source_index'][off]) if pool=='source' else (raw['target_distance'][j-1,off],raw['target_index'][j-1,off])
@@ -204,8 +220,24 @@ class IntegrationTests(TemporaryCase):
                 records.append(dict(domain='illumination',sample_id=s['sample_id'],relative_path=s['relative_path'],image_sha256=s['image_sha256'],file=file,sha256=ip.sha(query_dir/file)))
             ip.write_json(query_dir/'manifest.json',dict(format='original_query_features_v1',status='verified',extraction_identity=ctx['extraction_identity'],records=records))
         with mock.patch.dict(sys.modules,modules),mock.patch.object(ip,'context',return_value=ctx),mock.patch.object(ip.common,'available_ram',return_value=100*2**30):
-            capture.run(ctx,['illumination'],query_features=query_dir)
+            if expect_failure:
+                with self.assertRaises(MemoryError):
+                    capture.run(ctx,['illumination'],query_features=query_dir,capture_min_free_vram_gib=model_min_gib)
+                saved=ip.cache_state(ctx)
+                self.assertEqual(saved['status'],'capture_failed')
+                self.assertEqual(saved['records'],kept)
+                self.assertEqual(host.load_host.call_count,1 if allocation_failure else 0)
+                self.assertEqual(scoring.observe_fewshot_pil.call_count,0)
+                self.assertEqual(exact_mock.call_count,0)
+                admission=saved['invocations'][-1]['resource_admission']
+                self.assertEqual(admission['free_VRAM_before_loading_bytes'],int(free_gib*2**30))
+                self.assertFalse(admission['automatic_fallback'])
+                return
+            capture.run(ctx,['illumination'],query_features=query_dir,capture_min_free_vram_gib=model_min_gib)
         state=ip.cache_state(ctx);counts=state['last_invocation_counts']
+        admission=state['invocations'][-1]['resource_admission']
+        self.assertEqual(admission['required_free_VRAM_bytes'],(8 if reuse_Q else model_min_gib)*2**30)
+        self.assertFalse(admission['batch_changed']);self.assertFalse(admission['precision_changed']);self.assertFalse(admission['automatic_fallback'])
         self.assertEqual(counts['exact_source_calls'],8);self.assertEqual(counts['exact_target_calls'],64)
         self.assertEqual(counts['query_extraction_calls'],0 if reuse_Q else 2);self.assertEqual(counts['support_extraction_calls'],0 if reuse_Q else 8)
         self.assertEqual(counts['query_cache_reuses'],2 if reuse_Q else 0)
@@ -394,6 +426,27 @@ class AccountingTests(unittest.TestCase):
         self.assertAlmostEqual(r['AUROC'],roc_auc_score(y,s));self.assertAlmostEqual(r['AP'],average_precision_score(y,s))
 
 
+class AdmissionTests(unittest.TestCase):
+    def test_default_and_explicit_model_guard_and_invalid_values(self):
+        self.assertEqual(runner.parser().parse_args([]).capture_min_free_vram_gib,20)
+        self.assertEqual(runner.parser().parse_args(['capture','--capture-min-free-vram-gib','14']).capture_min_free_vram_gib,14)
+        self.assertEqual(runner.capture_vram_bytes(14),14*2**30)
+        for value in (float('nan'),float('inf'),-1,0,7.99):
+            with self.subTest(value=value),self.assertRaises(ValueError):runner.capture_vram_bytes(value)
+
+    def test_bad_admission_fails_before_context_or_output(self):
+        with mock.patch.object(ip,'context',side_effect=AssertionError('context entered')) as context:
+            with self.assertRaises(ValueError):runner.main(['capture','--capture-min-free-vram-gib','nan'])
+        context.assert_not_called()
+
+    def test_resource_report_uses_requested_guard_and_keeps_retrieval_floor(self):
+        ctx={'catalog':{'domains':{}}}
+        default=runner.resources(ctx);explicit=runner.resources(ctx,capture_min_free_vram_gib=14)
+        self.assertEqual(default['capture_free_VRAM_guard_bytes'],20*2**30)
+        self.assertEqual(explicit['capture_free_VRAM_guard_bytes'],14*2**30)
+        self.assertEqual(explicit['retrieval_only_free_VRAM_guard_bytes'],8*2**30)
+
+
 class ActualInputsTests(unittest.TestCase):
     def test_formal_domain_sets_support_order_exclusion_and_no_torch(self):
         ctx=ip.context(ip.defaults(ROOT),verify_data=False)
@@ -412,6 +465,8 @@ class Block(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0,Block())
 from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0 import runner,analysis,summary
 assert runner.parser().parse_args([]).stage=="preflight"
+assert runner.parser().parse_args(["--capture-min-free-vram-gib","14"]).capture_min_free_vram_gib==14
+assert runner.capture_vram_bytes(14)==14*2**30
 print("CPU_IMPORT_OK")
 '''
         p=subprocess.run([sys.executable,'-B','-c',code],cwd=ROOT,capture_output=True,text=True)

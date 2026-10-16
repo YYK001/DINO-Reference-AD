@@ -20,11 +20,20 @@ def parser():
     p.add_argument('--result-dir',type=Path,action='append',default=[])
     p.add_argument('--cpu-workers',type=int,default=4);p.add_argument('--memory-budget-gib',type=float,default=8)
     p.add_argument('--device',default='cuda:0');p.add_argument('--aupro-allocator-limit-gib',type=float,default=1.5)
+    p.add_argument('--capture-min-free-vram-gib',type=float,default=20,
+                   help='model capture admission only (default 20 GiB); explicit lower values do not change batch/precision or guarantee fit')
     p.add_argument('--no-write',action='store_true',help='preflight only; default preflight is always read-only')
     return p
 
 
-def resources(ctx):
+def capture_vram_bytes(value):
+    import math
+    if not math.isfinite(value) or value<8:
+        raise ValueError('--capture-min-free-vram-gib must be finite and at least 8 GiB')
+    return math.ceil(value*2**30)
+
+
+def resources(ctx,*,capture_min_free_vram_gib=20):
     from .method import BRANCHES
     from DINOv3.MADEqual.aebad_s_projection_layer_diagnostic.metrics import resource_bytes
     import math
@@ -39,7 +48,7 @@ def resources(ctx):
             pixel_scratch_bytes=pixels*(1+4*len(BRANCHES)),exact_pixel_sort_budget_bytes=resource_bytes(pixels))
         raw_total+=raw;prediction_total+=prediction;support_total+=support
     return dict(domains=domains,approximate_retained_bytes=raw_total+prediction_total+support_total,
-        capture_free_VRAM_guard_bytes=20*2**30,retrieval_only_free_VRAM_guard_bytes=8*2**30,
+        capture_free_VRAM_guard_bytes=capture_vram_bytes(capture_min_free_vram_gib),retrieval_only_free_VRAM_guard_bytes=8*2**30,
         capture_free_RAM_guard_bytes=12*2**30,CPU_domains_processed_serially=True,
         interpretation='estimates, not measured peaks; patch counts are conservative geometry estimates; actual geometry comes from original host; no protocol reductions',
         available_ram_bytes=ip.common.available_ram())
@@ -47,7 +56,7 @@ def resources(ctx):
 
 def preflight(ctx,args):
     r=ip.inventory(ctx,args.query_feature_dir,args.support_feature_dir)
-    r['resources']=resources(ctx);r['GT_decoded']=False
+    r['resources']=resources(ctx,capture_min_free_vram_gib=args.capture_min_free_vram_gib);r['GT_decoded']=False
     r['source_calibration_66_required']=False;r['output_created']=False
     needed_memory=any(v['reusable_complete_cache_images']!=v['heldout_images'] for v in r['domains'].values())
     needed_model=any(v['missing_query_extraction_images'] or (v['reusable_complete_cache_images']!=v['heldout_images'] and v['missing_support_indices']) for v in r['domains'].values())
@@ -66,6 +75,7 @@ def main(argv=None):
         if hasattr(args,key) and getattr(args,key) is not None:paths[key]=getattr(args,key)
     if args.cpu_workers<1 or args.cpu_workers>8:raise ValueError('bounded CPU workers must be between 1 and 8')
     if args.memory_budget_gib<=0:raise ValueError('positive exact-metric RAM budget required')
+    capture_vram_bytes(args.capture_min_free_vram_gib)
     # No GT read by prediction/capture. Preflight checks GT byte identity only;
     # evaluation alone decodes masks, after verified full prediction freeze.
     ctx=ip.context(paths,verify_gt=args.stage=='preflight')
@@ -81,7 +91,8 @@ def main(argv=None):
         if args.stage=='capture':
             from .capture import run
             output=run(ctx,domains,device_name=args.device,query_features=args.query_feature_dir,
-                support_features=args.support_feature_dir,reuse_root=args.reuse_cache_root)
+                support_features=args.support_feature_dir,reuse_root=args.reuse_cache_root,
+                capture_min_free_vram_gib=args.capture_min_free_vram_gib)
         elif args.stage=='predict':
             from .prediction import run
             output=run(ctx,output,domains,args.cpu_workers)
