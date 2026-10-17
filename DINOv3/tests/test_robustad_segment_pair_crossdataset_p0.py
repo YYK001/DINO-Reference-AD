@@ -167,6 +167,44 @@ class Cases(unittest.TestCase):
         ctx,_=self.fixture();ctx['bank']=self.root/'absent_original_banks.npz'
         with self.assertRaisesRegex(FileNotFoundError,'rebuilding forbidden'):rt.load_host(ctx,'cuda:0')
 
+    def test_complete_capture_ignores_unavailable_external_feature_root(self):
+        ctx,_=self.fixture();ctx['paths']['feature_root']=self.root/'offline_features'
+        state=ip.ledger(ctx);state['external_manifests']={'features':'previously_enrolled_hash'}
+        before=copy.deepcopy(state['records']);ip.write_json(ctx['root']/'cache_status.json',state)
+        with mock.patch.object(rt,'feature_manifest',wraps=rt.feature_manifest) as manifest, mock.patch.object(rt,'load_host',side_effect=AssertionError('model loaded')):
+            result=rt.capture(ctx,['lighting'],'both','cuda:0')
+        manifest.assert_not_called();self.assertEqual(result['status'],'selected_capture_complete')
+        self.assertEqual(result['records'],before)
+        self.assertEqual(result['external_manifests']['features'],'previously_enrolled_hash')
+        self.assertTrue(all(v==0 for v in result['last_cost']['counts'].values()))
+
+    def test_source_only_ignores_feature_root_even_with_missing_Target_caches(self):
+        ctx,_=self.fixture();ctx['paths']['feature_root']=self.root/'offline_features';state=ip.ledger(ctx)
+        for record in state['records']:
+            if record['kind']=='target':(ctx['root']/record['file']).unlink()
+        state['records']=[r for r in state['records'] if r['kind']!='target']
+        ip.write_json(ctx['root']/'cache_status.json',state)
+        with mock.patch.object(rt,'feature_manifest',wraps=rt.feature_manifest) as manifest, mock.patch.object(rt,'load_host',side_effect=AssertionError('model loaded')):
+            result=rt.capture(ctx,['lighting'],'source','cuda:0')
+        manifest.assert_not_called();self.assertEqual(result['status'],'selected_capture_complete')
+        self.assertTrue(all(v==0 for v in result['last_cost']['counts'].values()))
+
+    def test_pending_Target_still_requires_external_manifest_and_old_hash(self):
+        ctx,_=self.fixture();state=ip.ledger(ctx);r=next(r for r in state['records'] if r['kind']=='target')
+        (ctx['root']/r['file']).unlink();state['records'].remove(r)
+        directory=self.root/'external';ctx['paths']['feature_root']=directory
+        manifest=dict(format='original_query_support_features_v1',status='verified',category=ctx['category'],
+                      extraction_identity=ctx['extraction_identity'],records=[])
+        path=directory/ctx['category']/'manifest.json';ip.write_json(path,manifest)
+        state['external_manifests']={'features':ip.sha(path)};ip.write_json(ctx['root']/'cache_status.json',state)
+        before=copy.deepcopy(state['records']);path.unlink()
+        with mock.patch.object(rt,'load_host',side_effect=AssertionError('model loaded')):
+            with self.assertRaises(FileNotFoundError):rt.capture(ctx,['lighting'],'target','cuda:0')
+            manifest['records']=[dict(kind='query',sample_id=r['sample_id'],file='changed.npz',sha256='changed')]
+            ip.write_json(path,manifest)
+            with self.assertRaisesRegex(ValueError,'enrolled feature manifest changed'):rt.capture(ctx,['lighting'],'target','cuda:0')
+        self.assertEqual(ip.ledger(ctx)['records'],before)
+
     def test_legacy_Source_raw_nested_layout_identity_and_hash_history(self):
         ctx,raw=self.fixture();s=ctx['cat']['source_evaluation'][1]
         ctx['cat'].update(source_complete={'category':ctx['category'],'status':'complete'},legacy_records={s['relative_path']:{'path':'original_server_path'}})

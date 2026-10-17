@@ -62,6 +62,8 @@ Source 评价参照单独运行 `SOURCE_CH1`，只检索原 Source bank，不加
 
 优先级 A：本工具已有且历史 SHA 完整的缓存（无需模型）；B：可信原始 Q/支持特征，原 bank 上重新 Exact 检索（不构建模型）；C：显式补算，调用原完整宿主，Target query 仅一次完整提取，回调获取同次 Source/八支持检索副本。不会从距离恢复 Q，不接受 SPARC 特征。
 
+外部特征清单只在选中范围仍有待捕获 Target 时按需读取。完整缓存续跑、Source-only 捕获不依赖旧 `--feature-root` 是否在线；一旦需要该外部输入，仍严格检查清单历史 SHA 和实际复用文件 SHA，不因目录迁移或离线而自动降级跳过验证。
+
 可选输入：
 
 - `--source-raw-root`：原 `relation_oracle_four_layer_cache_seed42_v2` 输出根目录，含 `categories/robustad/<category>/complete.json` 和 `images/*.npz`。验证 Source v6 身份、记录身份、图片/GT SHA、层和网格；首次复用登记字节哈希，续跑不能重新认可修改文件。指定不存在的类别缓存时可显式补算；存在但不完整/身份不符则拒绝。
@@ -154,3 +156,5 @@ $env:OMP_NUM_THREADS='1'; $env:MKL_NUM_THREADS='1'; $env:OPENBLAS_NUM_THREADS='1
 覆盖 CPU 合成校准→预测→全像素评价→汇总→打包、哈希续跑、类别/支持身份、非方形 positions、边界投票、稳定 Top2、macro/ARD 与 Torch 禁导入。AUPRO 集成测试只替代 Torch/CUDA/ADEval 接口，验证地图身份和阶段衔接，不代表真实后端已执行。真实 DINOv3/CUDA、原 bank 加载、23 张补算、历史 CURRENT 复核、全域指标和实际资源峰值仍待 AutoDL 验证。实现可交独立 review；没有预写实验结论。
 
 2026-10-17 验证记录：本模块 23 项专项测试通过（7.910s）；另有 90 项相关既有测试通过（与本模块当时的 22 项合跑，共112项、155.777s）。新增 Python 与测试共9个文件 AST 检查通过；Bash `-n` 通过。本地真实输入只读预检：两类名单/图片/GT字节匹配、Torch 未导入；退出码2来自缺少原 bank、默认模型文件/源码入口及 ADEval，不是正式实验失败。
+
+同日审查修复后：26 项专项测试通过（8.692s），新增覆盖完整缓存＋不可用 feature-root、Source-only＋缺 Target 缓存、待捕获 Target＋外部清单缺失/历史 SHA 不符。未调用 GPU 或真实模型。

@@ -144,7 +144,7 @@ def load_features(ctx,record,sample):
 def capture(ctx,shifts,scope,device_name,min_free_gib=20):
     """A=own complete ledger, B=trusted Q/support, C=explicit original model."""
     started=time.perf_counter();state=ip.ledger(ctx);checks=[];model=None;device=None;resident_banks=None
-    refs=feature_manifest(ctx,state)
+    refs=None
     source=ctx['cat']['source_evaluation'] if scope in ('source','both') else []
     targets=[s for g in shifts for s in ctx['cat']['shifts'][g]['samples']] if scope in ('target','both') else []
     done={(r['kind'],r['sample_id']):r for r in state['records']}
@@ -173,6 +173,9 @@ def capture(ctx,shifts,scope,device_name,min_free_gib=20):
         for shift in shifts if targets else []:
             pending=[s for s in targets if s['shift']==shift and ('target',s['sample_id']) not in done]
             if not pending:continue
+            # Completed retrieval/geometry caches do not depend on the external
+            # features used to create them. Source-only capture never uses them.
+            if refs is None:refs=feature_manifest(ctx,state)
             features=[];support_meta=[];tick=time.perf_counter()
             for s in ctx['cat']['shifts'][shift]['supports']:
                 r=done.get(('support',s['sample_id']))

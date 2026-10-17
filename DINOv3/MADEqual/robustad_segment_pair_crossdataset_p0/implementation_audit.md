@@ -32,6 +32,8 @@
 
 输入/协议/代码身份发生变化要求新输出目录。已有逐图缓存先对旧账本 SHA，后做结构与数值核验；不重置或重新授信。未登记孤立/临时文件拒绝。已有完整缓存优先于外部特征和显式补算。预测 progress 同样保留首轮 SHA；已完成预测的完整集合及地图/评价 sidecar 均封存。
 
+`capture` 先按选中 scope/shift 和已验 SHA 账本确定待捕获 Target，只有存在缺项时才加载外部特征清单（每次调用最多一次）。完整缓存、Source-only 不读取无关 feature-root，也不重置已登记外部清单 SHA；真正需要该清单时，仍拒绝缺失、身份不符或历史哈希变化。
+
 `source_raw_root` 的旧缓存按原 Source identity 与 `_record_identity` 实际定义验证，并递归兼容真实 `images/source__source/*.npz` 布局。它们保存 Source-only 观测，不包含本次完整 Target 几何/Q，不能直接充当 Target raw。首次合法复用后登记旧 NPZ SHA，之后拒绝修改。
 
 有 Target 的历史 Source raw 时额外比较 Source 距离，保留最大/平均绝对及平均有符号误差和原 SHA；这项明确标记 `historical_distance_audit_only`，不是同次回调一致性。历史距离是否通过原严格距离界与历史 CURRENT 的跨环境兼容验收分别记录。没有历史 raw 则只审计历史 CURRENT 分数及排序/图像指标变化，不能宣称逐距离复现。续跑从缓存元数据保留该历史距离审计，不丢弃旧记录。
@@ -68,3 +70,5 @@ Source 恢复/模型加载、特征提取、Exact、支持处理、几何、CPU 
 真实原 bank、DINOv3 CUDA 加载与完整提取、23图补算、全域历史兼容验收、真实五指标/ARD、真实耗时/RAM/显存和原始缓存备份仍须 AutoDL 验证。没有真实实验结果、收益预判或 SOTA 结论。
 
 已执行：23 项专项测试全部通过（7.910s）；相关既有90项回归测试通过（与当时本模块22项合跑为112项，155.777s）。本模块与测试共9个 Python 文件 AST 通过，手动 Bash 入口语法检查通过。只读真实输入预检的身份错误为空、未导入Torch；本地缺原 bank、默认 checkpoint/源码路径和 ADEval，因此返回 blocked/2，未启动实验。
+
+同日外部特征按需加载修复后：26 项专项测试通过（8.692s）。新增三项测试覆盖完整缓存与离线 feature-root、缺 Target 缓存时的 Source-only、Target 缺项时外部清单缺失及历史 SHA 修改仍被拒绝；未运行模型/CUDA。
