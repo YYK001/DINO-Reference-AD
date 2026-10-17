@@ -1,4 +1,4 @@
-"""Explicit CUDA only; load original banks, never call a memory/MAD builder."""
+"""Explicit CUDA host/observation. Bank reconstruction lives in rebuild.py only."""
 from __future__ import annotations
 import gc
 import json
@@ -46,26 +46,32 @@ def verify_target(ctx,sample,raw,meta,checks):
     if not all(r['verified'] for r in checks[-2:]):raise ValueError('historical Source/Union exceeds fixed 1e-4 compatibility bound')
 
 
-def load_host(ctx,device_name,min_free_gib=20):
-    if not ctx['bank'].is_file():raise FileNotFoundError('original category bank missing; rebuilding forbidden: '+str(ctx['bank']))
-    if ip.sha(ctx['bank'])!=ctx['frozen']['bank_sha256']:raise ValueError('bank changed since first enrollment')
+def load_model(ctx,device_name,min_free_gib=20):
+    """Original seeded frozen model, without installing or constructing a bank."""
     for name,suffix in (('checkpoint',None),('dinov3','hubconf.py'),('official','config.json')):
         p=ctx['paths'][name] if suffix is None else ctx['paths'][name]/suffix
         if not p.is_file():raise FileNotFoundError(p)
     import torch
     from DINOv3.MADEqual.aebad_s_sparc_p0.runtime import load_host as original_host
-    from DINOv3.relation_oracle_cache.extract import install_category_banks
     device=torch.device(device_name)
     if device.type!='cuda' or not torch.cuda.is_available():raise RuntimeError('explicit recovery/capture requires CUDA')
     device=torch.device('cuda',device.index if device.index is not None else torch.cuda.current_device());torch.cuda.set_device(device)
     if torch.cuda.mem_get_info(device)[0]<min_free_gib*2**30 or ip.available_ram()<8*2**30:raise MemoryError('insufficient CUDA/RAM for original complete host; no fallback')
     model,device=original_host(dict(paths={k:str(v) for k,v in ctx['paths'].items()},
         frozen=dict(precision=ip.PRECISION,host_config=ctx['catalog']['host_config'])),str(device))
+    return model,device
+
+
+def load_host(ctx,device_name,min_free_gib=20):
+    if not ctx['bank'].is_file():raise FileNotFoundError('category bank missing; no implicit reconstruction: '+str(ctx['bank']))
+    if ip.sha(ctx['bank'])!=ctx['frozen']['bank_sha256']:raise ValueError('bank changed since first enrollment')
+    from DINOv3.relation_oracle_cache.extract import install_category_banks
     # Inspect dtype/shape before the original loader's float32 conversion.
     with np.load(ctx['bank'],allow_pickle=False) as f:
         for l in ip.LAYERS:
             a=f[str(l)]
             if a.dtype!=np.float32 or a.shape!=(100000,1280) or not np.isfinite(a).all():raise ValueError('invalid original Source bank')
+    model,device=load_model(ctx,device_name,min_free_gib)
     install_category_banks(model,ctx['bank'],expected_entries={l:100000 for l in ip.LAYERS},device=device)
     return model,device
 

@@ -12,9 +12,9 @@ from . import inputs as ip
 
 def parser():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('stage',nargs='?',default='preflight',choices=('preflight','recover-calibration','capture','predict','evaluate','evaluate-aupro','summarize','package'))
+    p.add_argument('stage',nargs='?',default='preflight',choices=('preflight','rebuild-source','recover-calibration','capture','predict','evaluate','evaluate-aupro','summarize','package'))
     p.add_argument('--project-root',type=Path,default=Path(__file__).resolve().parents[3])
-    for key in ('data','formal-metalparts','formal-pcb','source-root','official','dinov3','checkpoint','output-root','source-raw-root','feature-root','image-state-root'):
+    for key in ('data','formal-metalparts','formal-pcb','source-root','rebuilt-source-root','official','dinov3','checkpoint','output-root','source-raw-root','feature-root','image-state-root'):
         p.add_argument('--'+key,type=Path)
     p.add_argument('--category',choices=('both',*ip.CATEGORIES),default='both')
     p.add_argument('--shift',default='all');p.add_argument('--scope',choices=('both','target','source'),default='both')
@@ -91,9 +91,23 @@ def inventory(ctx):
     while not disk_path.exists():disk_path=disk_path.parent
     source_rows=sum(math.prod(estimated_grid(s)) for s in catalog['calibration']+catalog['source_evaluation'])
     max_pixels=max(sum((s['image_height']//4)*(s['image_width']//4) for s in group) for group in [catalog['source_evaluation'],*[v['samples'] for v in catalog['shifts'].values()]])
-    for role,p in [('original_Source_bank',ctx['bank']),('DINOv3_checkpoint',ctx['paths']['checkpoint']),('DINOv3_official_entry',ctx['paths']['dinov3']/'hubconf.py')]:
+    rebuilding='rebuilt_source_root' in ctx['paths']
+    rebuild_pending=rebuilding and not ctx['bank'].is_file()
+    reconstruction=None
+    if rebuilding:
+        from . import rebuild
+        reconstruction=dict(status='explicit_rebuild_pending' if rebuild_pending else 'bank_reconstructed_reproduction_pending',
+            root=str(rebuild.directory(ctx['paths'],ctx['category'])),
+            resources=rebuild.resources(rebuild.plan(ctx)),
+            historical_raw_adoption=False,original_patch_MAD_refitted=False)
+        if rebuild_pending:
+            budget=reconstruction['resources']
+            if ip.available_ram()<budget['minimum_available_ram_bytes']:errors.append('insufficient RAM for full original Source reconstruction')
+            if shutil.disk_usage(disk_path).free<budget['minimum_disk_free_bytes']:errors.append('insufficient disk for Source reconstruction')
+    for role,p in [('Source_bank',ctx['bank']),('DINOv3_checkpoint',ctx['paths']['checkpoint']),('DINOv3_official_entry',ctx['paths']['dinov3']/'hubconf.py'),('SuperADD_config',ctx['paths']['official']/'config.json')]:
         assets.append(dict(role=role,path=str(p),local_or_current_runtime_exists=p.is_file(),
-            running_server_status='must_check_on_AutoDL',missing_action='stop_needed_GPU_stage_no_rebuild_or_download'))
+            required_for_current_preflight=not (role=='Source_bank' and rebuild_pending),
+            running_server_status='must_check_on_AutoDL',missing_action='run_explicit_rebuild_source' if role=='Source_bank' and rebuild_pending else 'stop_needed_GPU_stage_no_implicit_rebuild_or_download'))
     candidates=[]
     raw_root=ctx['paths']['project']/'server_results/relation_oracle_seed42_cache_and_audit/mvtec_robustad_seed42_v2'
     raw_root=ctx['paths'].get('source_raw_root',raw_root)
@@ -110,7 +124,7 @@ def inventory(ctx):
         Source_train=180,memory_fit=157,calibration=23,Source_evaluation=len(catalog['source_evaluation']),
         cached_calibration=sum(('calibration',s['sample_id']) in cached for s in catalog['calibration']),
         cached_Source_evaluation=sum(('source',s['sample_id']) in cached for s in catalog['source_evaluation']),
-        image_calibration=image_state,assets=assets,identity_errors=errors,ARD_pending_missing_Source_inputs=source_pending,
+        image_calibration=image_state,assets=assets,identity_errors=errors,ARD_pending_missing_Source_inputs=source_pending,reconstruction=reconstruction,
         legacy_Source_cache_candidates=candidates,
         original_bank_historical_byte_hash_available=False,bank_first_enrollment_required=not (root/'inputs.json').is_file(),
         resource_estimate=dict(raw_uncompressed_bytes=raw,support_feature_bytes=support,prediction_uncompressed_bytes=prediction,
@@ -129,13 +143,13 @@ def main(argv=None):
     ip.safe(args.evaluation_tag)
     if args.category=='both' and args.shift!='all':raise ValueError('select one category for an individual shift')
     paths=ip.defaults(args.project_root)
-    for k in (*paths,'source_raw_root','feature_root','image_state_root'):
+    for k in (*paths,'source_raw_root','feature_root','image_state_root','rebuilt_source_root'):
         if hasattr(args,k) and getattr(args,k) is not None:paths[k]=getattr(args,k)
     categories=ip.CATEGORIES if args.category=='both' else (args.category,)
     if args.stage=='preflight':
         from importlib.metadata import version,PackageNotFoundError
         versions={}
-        for name in ('numpy','scipy','Pillow','scikit-learn','psutil','torch','torchvision','timm','omegaconf','adeval'):
+        for name in ('numpy','scipy','Pillow','scikit-learn','psutil','torch','torchvision','torchmetrics','tqdm','timm','omegaconf','adeval'):
             try:versions[name]=version(name)
             except PackageNotFoundError:versions[name]=None
         reports=[];errors=[]
@@ -143,13 +157,23 @@ def main(argv=None):
             try:reports.append(inventory(ip.context(paths,cat)))
             except (OSError,ValueError,KeyError) as exc:errors.append(dict(category=cat,error=str(exc)))
         blocked=bool(errors) or any(r['identity_errors'] for r in reports)
-        missing=any(not a['local_or_current_runtime_exists'] for r in reports for a in r['assets']) or any(v is None for v in versions.values())
+        # Frozen ViT backbone/industrial host do not import these training extras.
+        # Keep their versions visible without blocking the inference-only path.
+        required={n:v for n,v in versions.items() if n not in ('timm','omegaconf')}
+        missing=any(not a['local_or_current_runtime_exists'] and a['required_for_current_preflight'] for r in reports for a in r['assets']) or any(v is None for v in required.values())
         result=dict(tool=ip.TOOL,status='blocked' if blocked or missing else 'filesystem_preflight_passed',protocol=ip.PROTOCOL,
             categories=reports,errors=errors,torch_imported='torch' in sys.modules,execution_environment='user_selected_AutoDL',
-            dependency_versions=versions,missing_dependencies=[n for n,v in versions.items() if v is None],
+            dependency_versions=versions,missing_dependencies=[n for n,v in required.items() if v is None],
+            optional_dependency_status={n:versions[n] for n in ('timm','omegaconf')},
             note='missing local bank is not evidence of missing server bank; no remote check performed')
         if result['torch_imported']:raise RuntimeError('preflight unexpectedly imported Torch')
         print(json.dumps(result,ensure_ascii=False,indent=2));return 2 if blocked or missing else 0
+    if args.stage=='rebuild-source':
+        from . import rebuild
+        if 'rebuilt_source_root' not in paths:raise ValueError('rebuild-source requires explicit --rebuilt-source-root')
+        for category in categories:
+            rebuild.run(ip.context(paths,category),args.device,args.min_free_vram_gib)
+        print('STAGE_COMPLETE=rebuild-source; calibration and historical reproduction still required');return 0
     contexts=[ip.context(paths,c,enroll=True) for c in categories]
     if args.stage in ('summarize','package'):
         from . import reporting

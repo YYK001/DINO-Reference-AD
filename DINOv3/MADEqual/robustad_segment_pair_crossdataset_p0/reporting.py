@@ -102,7 +102,8 @@ def summarize(contexts,tag,out):
     for name,rows in dict(diagnostics,**{'metrics.csv':metrics,'source_reference_metrics.csv':sources,'ARD.csv':ard,
         'metric_comparisons.csv':comparisons,'pending.csv':pending,'cache_index.csv':cache_index}).items():ip.write_csv(out/name,rows)
     ip.write_json(out/'inputs.json',dict(protocol=ip.PROTOCOL,catalog_sha256=ip.CATALOG_SHA,
-        categories={c['category']:c['identity'] for c in contexts},parents=parents,evaluation_tag=tag))
+        categories={c['category']:c['identity'] for c in contexts},parents=parents,evaluation_tag=tag,
+        Source_bank_provenance={c['category']:c['frozen'].get('bank_provenance','original_tree_first_enrollment') for c in contexts}))
     volume=[]
     for ctx in contexts:
         for sub in ('raw_cache','support_features','source_calibration_raw','source_evaluation_raw','predictions'):
@@ -115,6 +116,9 @@ def summarize(contexts,tag,out):
         '逐shift等权形成类别macro，再对MetalParts/PCB等权；不混入PiledBags或AeBAD。',
         '历史分数兼容阈值1e-4，严格1e-5结果另存；兼容通过不代表历史距离逐元素复现。','',
         '| category | shift | branch | I-AUROC | I-AP | P-AUROC | P-AP | AUPRO |','|---|---|---|---:|---:|---:|---:|---:|']
+    for ctx in contexts:
+        if 'rebuilt_source_root' in ctx['paths']:
+            lines.insert(1,ctx['category']+'：使用独立重建Source库；原构库入口/seed42/每层100K。旧bank字节身份不可证明；历史校准与分数检查另存，不沿用旧距离缓存。')
     for r in metrics:lines.append('| '+' | '.join([r['category'],r['shift'],r['branch'],*['NA' if r.get(k) is None else f'{r[k]:.9f}' for k in ev.METRICS]])+' |')
     lines+=['','指标单位fraction。各shift的改善与下降均保留；比较顺序为SEGMENT对UNION、PAIR对SEGMENT、PAIR对UNION。',
         'macro不能替代逐shift结果。实例自身峰值和固定UNION峰值分别计数；修复与新增损失并报，映射消失/空环带保留NA。',
@@ -154,6 +158,12 @@ def package(contexts,summary,output,raw_category=None):
     for ctx in contexts:
         cat=ctx['category'];root=ctx['root']
         if raw_category is None:
+            if 'rebuilt_source_root' in ctx['paths']:
+                from . import rebuild
+                rebuilt=rebuild.directory(ctx['paths'],cat)
+                rebuild.verify(ctx['paths'],cat)
+                for name in ('rebuild_status.json','rebuild_plan.json','rebuild_failure.json','memory/selected_candidate_indices.npz'):
+                    add(rebuilt/name,'frozen_inputs/'+cat+'/reconstructed_Source/'+name)
             for name in ip.FORMAL_FILES:add(ctx['paths']['formal_'+cat.lower()]/name,'frozen_inputs/'+cat+'/fewshot/'+name)
             for name in ('complete.json','memory/memory_provenance.json','calibration/calibration_state.npz'):
                 add(ctx['source']/name,'frozen_inputs/'+cat+'/Source/'+name)

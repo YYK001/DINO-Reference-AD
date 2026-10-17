@@ -30,6 +30,7 @@ args=(--project-root "$PROJECT_ROOT" --data "$ROBUSTAD_ROOT"
 if [[ -n "${SOURCE_RAW_ROOT:-}" ]]; then args+=(--source-raw-root "$SOURCE_RAW_ROOT"); fi
 if [[ -n "${FEATURE_ROOT:-}" ]]; then args+=(--feature-root "$FEATURE_ROOT"); fi
 if [[ -n "${IMAGE_STATE_ROOT:-}" ]]; then args+=(--image-state-root "$IMAGE_STATE_ROOT"); fi
+if [[ -n "${REBUILT_SOURCE_ROOT:-}" ]]; then args+=(--rebuilt-source-root "$REBUILT_SOURCE_ROOT"); fi
 if [[ "$stage" != all ]]; then
   exec "$PYTHON" -B -u -m "$module" "$stage" "${args[@]}" "$@"
 fi
@@ -37,7 +38,10 @@ mkdir -p "$OUTPUT_ROOT"
 log="$OUTPUT_ROOT/pipeline.log"
 trap 'rc=$?; printf "\nPIPELINE_EXIT_CODE=%s; failed, outputs retained; no shutdown\n" "$rc" | tee -a "$log"; exit "$rc"' ERR
 started=$(date +%s)
-for step in preflight recover-calibration capture predict evaluate evaluate-aupro; do
+steps=(preflight)
+if [[ -n "${REBUILT_SOURCE_ROOT:-}" ]]; then steps+=(rebuild-source); fi
+steps+=(recover-calibration capture predict evaluate evaluate-aupro)
+for step in "${steps[@]}"; do
   printf '\nSTAGE=%s START=%s\n' "$step" "$(date --iso-8601=seconds)" | tee -a "$log"
   "$PYTHON" -B -u -m "$module" "$step" "${args[@]}" "$@" 2>&1 | tee -a "$log"
   printf 'STAGE=%s EXIT_CODE=0\n' "$step" | tee -a "$log"

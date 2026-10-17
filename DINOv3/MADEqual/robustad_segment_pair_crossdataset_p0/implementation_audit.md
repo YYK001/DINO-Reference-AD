@@ -9,7 +9,7 @@
 | 数据与原划分 | `relation_reliability.datasets.robustad_full_records / split_source_normal`；`superadd_external.dataset_adapter._robust_split` | 开发时核对原完整发现；运行预检逐 split 发现，让缺失 Source 测试输入可独立标记 ARD pending。180 张 metadata 顺序、157/23 子序列与历史 manifest 逐项相同，不按文件名重排 |
 | 固定 K8 | 原 `robustad_target_fewshot_p0/support.py` 的 manifest 语义 | 直接冻结 target_matched、support_index=1..8；不调用重新选择支持的函数；排除相同八张，异常一张不减 |
 | 原宿主 | `relation_reliability.superadd_host.construct_exact_host`，经 `aebad_s_sparc_p0.runtime.load_host` 的冻结宿主加载包装 | 只复用加载器，**不调用 SPARC 校正/投影/构库**。原 config、checkpoint SHA、冻结参数、完整预处理和 CUDA device 设置原样检查 |
-| Source bank | `relation_oracle_cache.extract.install_category_banks` | 先验原 NPZ float32、各层 100000×1280，再调用安装；严格从原 v6 类别目录取 bank，无 builder fallback |
+| Source bank | `relation_oracle_cache.extract.install_category_banks` | 先验 NPZ float32、各层 100000×1280，再调用安装；默认原v6树，无builder fallback；授权后显式重建走独立来源/目录 |
 | 支持特征 | `robustad_target_fewshot_p0.support._extract_four_layers`，实际来源为 `DINOv3/ShiftADD/aebad_s_p0/memory.py` | 原始 1280 维行，支持自身的真实网格；无抽样、归一化或统一网格要求 |
 | Target 捕获 | `robustad_target_fewshot_p0.scoring.observe_fewshot_pil`；`aebad_s_union_support_loo.analysis.CaptureLog` | 单张完整 query 一次原提取，nearest/geometry 回调复制同次完整检索，source_support=None；逐层 Source+八支持，没有 Source-extra |
 | Source 观测 | `relation_reliability.superadd_host.observe_pil` | Source 校准与 Source 测试独立沿用原 Source 路径（其原单 crop batch=1）；Target 沿用原 Few-shot 完整切窗 batch。没有为省显存改变任一路径 |
@@ -24,11 +24,11 @@
 
 ## 冻结身份与旧回退的处理
 
-原 Few-shot 的 `runner._try_external_bundle` 在外部输入不全时可能返回 None，并使旧 runner 进入 `build_exact_official_memory` / `_fit_source_mad`。本工具不运行旧 runner，也不调用这些构建入口。缺原 bank 或 patch MAD 明确失败。
+原 Few-shot 的 `runner._try_external_bundle` 在外部输入不全时可能返回 None，并使旧 runner 进入 `build_exact_official_memory` / `_fit_source_mad`。本工具不运行旧 runner；正常捕获缺bank明确失败。2026-10-17用户授权原库丢失后的独立重建，仅显式 `rebuild-source` 调用原构库入口，仍禁止调用 `_fit_source_mad` 替换原MAD。
 
 `frozen_catalog.json` 包含两类原正式文件 SHA、原 Source 完成/校准/sidecar/provenance SHA、完整原训练顺序、校准子集、Source 测试名单、各 shift 支持/评价名单与图片/GT SHA。目录名不作为可信依据。局部或全域都使用相同冻结清单。
 
-历史 Source 归档没有 bank 字节 SHA，其旧 Source identity 只包含 bank 的文件大小及 Source 元数据哈希。新工具首次显式执行从指定原树登记 bank SHA，续跑严格核对；不声称首次登记可以证明历史字节身份。初次必须由用户提供原 bank，不能重建替代。恢复 23 张原校准距离后核对层顺序、原 ECDF patch 数量、原 patch median/scale；只拟合 CH1 image MAD。
+历史 Source 归档没有 bank 字节 SHA，其旧 Source identity 只包含 bank 的文件大小及 Source 元数据哈希。首次登记当前bank SHA，续跑严格核对；不声称登记能够证明历史字节身份。原库模式要求用户提供原bank；重建模式另存新bank来源/清单SHA，不能放回旧目录冒充原库。恢复23张原校准距离后核对层顺序、原ECDF patch数量、原patch median/scale；只拟合CH1 image MAD。
 
 输入/协议/代码身份发生变化要求新输出目录。已有逐图缓存先对旧账本 SHA，后做结构与数值核验；不重置或重新授信。未登记孤立/临时文件拒绝。已有完整缓存优先于外部特征和显式补算。预测 progress 同样保留首轮 SHA；已完成预测的完整集合及地图/评价 sidecar 均封存。
 
@@ -72,3 +72,29 @@ Source 恢复/模型加载、特征提取、Exact、支持处理、几何、CPU 
 已执行：23 项专项测试全部通过（7.910s）；相关既有90项回归测试通过（与当时本模块22项合跑为112项，155.777s）。本模块与测试共9个 Python 文件 AST 通过，手动 Bash 入口语法检查通过。只读真实输入预检的身份错误为空、未导入Torch；本地缺原 bank、默认 checkpoint/源码路径和 ADEval，因此返回 blocked/2，未启动实验。
 
 同日外部特征按需加载修复后：26 项专项测试通过（8.692s）。新增三项测试覆盖完整缓存与离线 feature-root、缺 Target 缓存时的 Source-only、Target 缺项时外部清单缺失及历史 SHA 修改仍被拒绝；未运行模型/CUDA。
+
+## 用户授权的 Source 独立重建（2026-10-17）
+
+用户在服务器检查原目录和找到的备份，确认两类 bank 均缺失后授权重建。本节更新先前“只接受原库”的适用范围；历史盘点记录不代表当前仍未核对服务器。旧 Source 元数据、MAD、sidecar、正式结果始终只读。
+
+| 项目 | 原代码依据 | 本轮处理 |
+|---|---|---|
+| 种子顺序 | `relation_reliability.runner._run_category`：`_seed_everything(42)`在`construct_exact_host`之前 | 复用冻结宿主加载器相同的seed顺序；不在模型构造后重新seed |
+| 构库输入 | `_run_category`传入原`train_records`；`superadd_host.build_exact_official_memory`先转全部图像张量 | 严格全部180张原顺序，不预先只取157张 |
+| 校准排除 | `memory_variants.build_official_memory_spooled`按原列表index%threshold_fraction排除 | threshold_fraction=8；23校准/157 memory；不二次划分 |
+| 特征和采样 | 原完整拼接特征；原sampler、100轮、Exact分块cdist、100K/层、auto存储 | 原入口直接调用，无新采样实现或预算/精度/候选变化 |
+| 来源索引 | `relation_codebook.fit_shared_codebooks`中`physical[layer]=selected_candidate_indices[layer]` | 无需重做码本即可将新索引和旧sidecar的physical_L逐顺序比较；保存候选图块区间以映射回图像/patch |
+| 校准统计 | 原patch MAD/ECDF | 新库重新算23张距离，再按现有容差核验旧数量/median/scale；失败不覆盖MAD |
+| 历史距离身份 | 旧identity只依赖bank文件大小和元数据，不含bank字节SHA | 重建模式直接禁止legacy_raw采用；Source测试重算，Target仍重新完整检索；不因NPZ大小相同认可旧距离 |
+| 新身份 | `rebuild.py`与`inputs.context` | 显式独立根、计划身份/代码/文件SHA、bank_origin、重建清单SHA进入预测身份；新旧输出不能混用 |
+| 失败/续跑 | 独立完整清单才可复用 | 原样保留失败/部分目录；不重置旧哈希，不覆盖原件，不在失败后改seed/预算 |
+
+保守RAM估计包含原180张float32张量、四层完整候选和20GiB工作空间：MetalParts46.153GiB、PCB63.129GiB；按类别顺序执行。每类bank约1.907GiB，入场磁盘下限另含4GiB余量。原auto若因运行中RAM变化改选disk，必须另满足完整候选scratch空间，不能依赖较小的常驻bank磁盘预算。实际CPU/GPU/RAM/时间需服务器验证。构库不重做与本次检测无关的关系聚类/码本/可靠性拟合。
+
+`bank_reconstructed`不是“复现通过”。旧bank字节SHA缺失，索引相等也不能证明旧特征逐字节相同；23张统计、Target CURRENT兼容检查、Source/Target正式评价分别保留真实结果。报告和review包记录重建来源，不冒称原bank复用。
+
+本地原宿主、ViT backbone及构库模块在屏蔽timm/omegaconf实际导入后可CPU导入，不构建模型。完整hubconf导入检查因本机缺torchmetrics未完成，不能写成完整真实宿主初始化通过；预检已将torchmetrics列为必需，将timm/omegaconf列为可选信息。未安装依赖。
+
+本轮新增重建的CPU输入/顺序/索引/状态/身份验证；GPU构库与模型以替身隔离，测试不证明真实Torch/CUDA构库通过。保持原SEGMENT/PAIR数学和评价专项回归。真实两类重建、23张校准、历史分数及全域指标均未执行。
+
+重建入口接入后的最终本地专项：39项通过；包含原CPU阶段回归、实际生产包装函数的替身调用、独立重建身份登记/篡改拒绝、原auto决策与磁盘空间防护。10个Python文件AST及Bash -n通过。默认preflight禁导入Torch测试通过。真实构库、校准与指标均未执行。

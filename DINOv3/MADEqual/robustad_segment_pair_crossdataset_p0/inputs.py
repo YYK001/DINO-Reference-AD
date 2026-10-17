@@ -169,6 +169,8 @@ def code_hashes():
         'DINOv3/ShiftADD/aebad_s_p0/memory.py',
         'DINOv3/relation_reliability/superadd_host.py','DINOv3/relation_reliability/datasets.py',
         'DINOv3/relation_reliability/official_metrics.py','DINOv3/relation_oracle_cache/extract.py',
+        'external_baselines/superadd_external/memory_variants.py',
+        'external_baselines/SuperADD/tracks/industrial/src/industrial/nearest_neighbor.py',
         'DINOv3/MADEqual/image_granularity_calibration/scoring.py','DINOv3/MADEqual/connected_region/scoring.py',
         'external_baselines/superadd_external/dataset_adapter.py')
     return {p.relative_to(root).as_posix():sha(p) for p in [*sorted(Path(__file__).parent.glob('*.py')),*[root/s for s in shared]]}
@@ -193,14 +195,23 @@ def context(paths,category,*,enroll=False):
     base=dict(tool=TOOL,category=category,catalog_sha256=CATALOG_SHA,protocol=PROTOCOL,code=code_hashes())
     saved=read_json(root/'inputs.json') if (root/'inputs.json').is_file() else None
     bank=src/'memory/official_banks.npz'
+    bank_provenance=None
+    if 'rebuilt_source_root' in paths:
+        from . import rebuild
+        bank=rebuild.directory(paths,category)/'memory/official_banks.npz'
+        provisional=dict(paths=paths,category=category,cat=cat,catalog=catalog,source=src)
+        bank_provenance=rebuild.snapshot(paths,category,rebuild.plan(provisional))
+        if enroll and bank_provenance['bank_origin']=='explicit_reconstruction_pending':
+            raise FileNotFoundError('explicit rebuild-source must complete before enrollment: '+str(bank))
     if saved:
         if saved['frozen']['base']!=base or digest(saved['frozen'])!=saved['identity']:raise ValueError('frozen code/protocol/category changed; new output root required')
         bank_hash=saved['frozen']['bank_sha256']
     else:
         bank_hash=sha(bank) if enroll and bank.is_file() else None
-        if enroll and bank_hash is None:raise FileNotFoundError('original Source bank required for initial enrollment; no rebuild: '+str(bank))
+        if enroll and bank_hash is None:raise FileNotFoundError('Source bank required for initial enrollment; use explicit rebuild-source for a separate reconstruction: '+str(bank))
     bank_size=saved['frozen']['bank_size_bytes'] if saved else (bank.stat().st_size if bank.is_file() else None)
     frozen=dict(base=base,bank_sha256=bank_hash,bank_size_bytes=bank_size)
+    if bank_provenance is not None:frozen['bank_provenance']=bank_provenance
     ctx=dict(paths=paths,category=category,cat=cat,catalog=catalog,root=root,source=src,bank=bank,
         frozen=frozen,identity=digest(frozen),medians=med,scales=scales)
     ctx['extraction_identity']=digest(dict(category=category,checkpoint_sha256=CHECKPOINT_SHA,config=catalog['host_config'],precision=PRECISION,
@@ -213,7 +224,7 @@ def context(paths,category,*,enroll=False):
         if root.exists():raise FileExistsError('unregistered output directory: '+str(root))
         root.mkdir(parents=True)
         write_json(root/'inputs.json',dict(identity=ctx['identity'],frozen=frozen,paths={k:str(v) for k,v in paths.items()},
-            bank_attestation='first enrollment from original source tree; historical bank byte hash absent in local archive'))
+            bank_attestation=bank_provenance or 'first enrollment from original source tree; historical bank byte hash absent in local archive'))
         write_json(root/'protocol.json',PROTOCOL)
     return ctx
 

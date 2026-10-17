@@ -36,7 +36,7 @@ Source 评价参照单独运行 `SOURCE_CH1`，只检索原 Source bank，不加
 1. 原 RobustAD 数据及 metadata，含 Source train、Source test0、所有 Target shift 和 GT。
 2. 两类原 Few-shot 正式目录中的 `complete.json`、`sample_scores.csv`、`support_manifest.csv`。
 3. 原 Source v6 根目录的 `dataset_manifest.csv`、`protocol.json`；每类 `complete.json`、`memory/memory_provenance.json`、`memory/anchor_sidecars.npz`、`calibration/calibration_state.npz`。
-4. **同一原 Source v6 树中**两类 `memory/official_banks.npz`，每层 float32 100000×1280。缺失直接报错，没有自动构库或补拟合路径。
+4. 默认读取**同一原 Source v6 树中**两类 `memory/official_banks.npz`，每层 float32 100000×1280。没有自动构库或补拟合回退。原库丢失时，可按下节显式重建到独立目录。
 5. 仅需补算时才加载原 DINOv3 官方源码、指定 ViT-H+/16 checkpoint 与 SuperADD 宿主。Checkpoint 由原宿主按冻结 SHA 校验。CPU 预测/评价不加载这些文件。
 6. 显式 AUPRO 阶段需要可用 CUDA 和原 ADEval；使用已有后端、200 阈值、FPR 上限 0.3，不切换 CPU 近似实现。
 
@@ -52,6 +52,7 @@ Source 评价参照单独运行 `SOURCE_CH1`，只检索原 Source bank，不加
 
 | 阶段 | 行为 |
 |---|---|
+| `rebuild-source` | 仅显式指定 `--rebuilt-source-root` 后，复用原构库入口重建独立库；不修改旧库、MAD或正式结果 |
 | `recover-calibration` | 逐类恢复原 23 张 Source 距离，验证原 patch 数量/MAD，再冻结独立 CH1 状态 |
 | `capture` | 按类别、shift 顺序，取得 Source-only 和 Target 的原始检索/几何；及时释放支持与模型 |
 | `predict` | CPU 并行生成三个距离分支和 CH1 分数，完整分组后冻结，不读 GT |
@@ -70,7 +71,33 @@ Source 评价参照单独运行 `SOURCE_CH1`，只检索原 Source bank，不加
 - `--feature-root`：每类 `manifest.json`，format=`original_query_support_features_v1`、status=`verified`，必须包含本工具预检显示的 extraction_identity、category，以及 kind=query/support、sample_id、file、sha256 的 records。NPZ 包含 metadata、完整双射 positions、layer_7/15/23/31 原始 float32 [patch,1280]。metadata 核对类别、样本和图片 SHA、extraction_identity、层、dtype、feature_units=`original_1280d_no_normalization`、grid、processed_shape、output_shape。manifest 和文件哈希在首次复用后锁定；没有可信来源不得自行标记 verified。
 - `--image-state-root`：复用本工具**相同冻结身份**的逐类 `image_calibration_state.json` 与 `calibration_status.json`，不接受外域或只有数值没有来源的 MAD。
 
-初次登记要求原 bank 在指定树中存在。登记后仅 CPU 处理已有距离可不挂载 bank；GPU 加载仍必须按已登记 SHA 核对。
+初次登记要求所选 bank 存在；重建模式还要求完整且 SHA 通过的重建记录。原库模式登记后仅 CPU 处理已有距离可不挂载 bank；GPU 加载必须按已登记 SHA 核对。重建模式保留重建资产与清单供身份复核。
+
+## 原 Source bank 丢失后的显式重建
+
+2026-10-17 用户确认服务器原 bank 与已找回的备份均不含所需 bank，并授权重建。`SOURCE_ROOT` 仍指向原元数据和 patch MAD，**不可将新 bank 放进旧 v6 树**。另设 `REBUILT_SOURCE_ROOT`，所有新预测放在另一个新的 `OUTPUT_ROOT`。
+
+调用链与原实验一致：原 v6 runner 在构造模型前 seed42 → `construct_exact_host` → `build_exact_official_memory(model, 全部180张原顺序记录)` → `build_official_memory_spooled(storage_backend="auto", return_selected_indices=True)`。构库函数内部按 index%8 排除23张，剩157张的完整特征池由原 `upstream_subsampling_distance_based_fast`、100轮、原 Exact 距离选出四层各100K个原始特征；不换采样器、不缩候选、不重设构造模型后的 RNG。不重做第一章关系码本、聚类或可靠性训练。
+
+每类保存 `memory/official_banks.npz`、`memory/selected_candidate_indices.npz`、`rebuild_plan.json`、`rebuild_status.json`。记录原180张身份和顺序、候选图块的索引区间/网格、实际配置/代码、seed、环境、文件SHA、RAM/显存/时间。将所选索引与旧sidecar的 `physical_L` **逐顺序比较**，但旧bank字节SHA不存在，不能据此宣称历史bank逐字节相同。`bank_reconstructed`只表示构库完成，不表示复现实验通过。
+
+重建模式**不采用旧 Source 距离作为新库观测**，即使新旧 NPZ 文件大小相同。重新计算23张校准距离及Source测试距离，保持旧 patch MAD只读；23图原patch数量、median/scale（原 atol=1e-7 / rtol=1e-6）及CPU统计核验通过后，才冻结CH1状态。Target CURRENT继续沿用现有严格1e-5审计/兼容1e-4验收，不因重建放宽。超限留下诊断并失败，不自动重拟合MAD、改种子或换方法。
+
+采用原完整候选和原 auto 存储；预检为顺序重建保守预留全部候选RAM、原180张float32图像张量及20GiB工作空间，约MetalParts46GiB、PCB63GiB（估计，非实测）。两类bank合计约3.82GiB；还需后续约19.47GiB未压缩缓存/支持/预测、Source观测、CPU排序空间和备份空间。预检不会导入Torch或开始重建；显式重建每30秒输出心跳。部分或失败的重建不自动覆盖/重新认可，保留目录并改用新重建根目录；一类完整成功后可复用，该类SHA和计划仍必须一致。
+
+在下方统一环境中额外设置即可走重建流程：
+
+```bash
+export REBUILT_SOURCE_ROOT="$ASSET_ROOT/DINOv3/outputs/mad_equal/robustad_source_rebuilt_$(date +%Y%m%d_%H%M%S)"
+entry=DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/scripts/run_autodl.sh
+bash "$entry" preflight --no-write
+# 单独只重建（不关机）；后续仍需 recover-calibration 和完整验证。
+bash "$entry" rebuild-source
+```
+
+`all` 只有在明确设置 `REBUILT_SOURCE_ROOT` 时才在 preflight 后加入 rebuild-source，再按原阶段顺序运行；不设置时仍要求原库。完整运行开启AUTO_SHUTDOWN=1时，依然只有全部指标/ARD和打包成功后关机，任何中途失败不关机。不要在续跑时重新生成这两个根目录的时间戳；保留原值。
+
+依赖预检将 `timm/omegaconf` 列为可选信息：当前industrial宿主、ViT backbone及原构库模块的CPU导入不需要它们。完整官方hub还会导入 `torchmetrics`，列为必需。版本检查不能代替服务器实际导入/模型初始化；不自动安装包。
 
 已发现本地旧归档 `server_results/relation_oracle_seed42_cache_and_audit/mvtec_robustad_seed42_v2`，实际为递归 `images/<domain>__<shift>/*.npz` 布局；包含两类完整 Source 测试缓存及 Target 的 Source-only 距离，不含训练校准的 23 张。预检只报告候选，显式指定 SOURCE_RAW_ROOT 后才进行原 bank-dependent 身份验证/复用。AutoDL 是否保留该旧归档尚未确认。有历史 Target Source raw 时另存严格距离比较审计；跨环境验收仍按冻结 CURRENT 分数兼容规则，同次回调距离核验不改变。
 

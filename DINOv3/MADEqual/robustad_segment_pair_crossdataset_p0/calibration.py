@@ -13,6 +13,9 @@ DEFINITION='CH1_interpolated_peak_valid3x3_local_float32_1.4826MAD_eps1e-8_half_
 
 def legacy_raw(ctx,sample,state):
     """Original Source-only cache headers and Source v6 identity, no guessed Q."""
+    # Even identical NPZ SIZE does not make a reconstructed bank the old bank.
+    # Fresh observations must use the newly registered bank; no old raw adoption.
+    if 'rebuilt_source_root' in ctx['paths']:return None
     directory=ctx['paths'].get('source_raw_root')
     if directory is None:return None
     root=directory/'categories/robustad'/ctx['category']

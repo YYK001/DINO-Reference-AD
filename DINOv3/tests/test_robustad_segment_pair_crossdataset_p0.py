@@ -13,12 +13,218 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 from DINOv3.MADEqual.robustad_segment_pair_crossdataset_p0 import inputs as ip,calibration as cal,prediction as pr,evaluation as ev,reporting as rep,runner, runtime as rt
+from DINOv3.MADEqual.robustad_segment_pair_crossdataset_p0 import rebuild
 from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0 import method
 from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0.verification import historical_score
 from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.scoring import statistics
 from DINOv3.tests.test_aebad_s_segment_pair_crossdomain_p0 import raw_fixture
 
 ROOT=Path(__file__).resolve().parents[2]
+
+
+class Reconstruction(unittest.TestCase):
+    """Real CPU provenance/geometry/validation; GPU builder explicitly mocked."""
+    def setUp(self):
+        (ROOT/'downloads').mkdir(exist_ok=True)
+        self.temp=tempfile.TemporaryDirectory(prefix='robust_rebuild_',dir=ROOT/'downloads')
+        self.root=Path(self.temp.name).resolve()
+    def tearDown(self):self.temp.cleanup()
+
+    def context(self):
+        catalog=ip.read_json(Path(ip.__file__).with_name('frozen_catalog.json'))
+        cat=copy.deepcopy(catalog['categories']['MetalParts'])
+        paths={k:self.root/k for k in ('source_root','data','official','dinov3','checkpoint','formal_metalparts','formal_pcb','output_root','rebuilt_source_root')}
+        source=paths['source_root']/'categories/robustad/MetalParts'
+        count=sum(int(np.prod(runner.estimated_grid(s))) for s in cat['train'] if s['source_index']%8)
+        old=dict(sampler='upstream_subsampling_distance_based_fast',sampler_iterations=100,memory_budget_per_layer=100000,
+                 sampler_distance_backend='exact_query_chunked_torch_cdist_topk',sampler_distance_matrix_max_bytes=1<<30,
+                 layer_audits={str(l):dict(candidate_count=count,memory_entries=100000) for l in ip.LAYERS})
+        ip.write_json(source/'memory/memory_provenance.json',dict(official_builder=old))
+        return dict(paths=paths,source=source,category='MetalParts',cat=cat,catalog=catalog)
+
+    def test_plan_preserves_all180_order_and_only157_candidate_blocks(self):
+        ctx=self.context();p=rebuild.plan(ctx)
+        self.assertEqual(len(p['train']),180);self.assertEqual(len(p['candidate_blocks']),157)
+        self.assertEqual(p['candidate_rows'],947024)
+        self.assertEqual([s['source_index'] for s in p['train']],list(range(180)))
+        self.assertTrue(all(s['source_index']%8 for s in p['candidate_blocks']))
+        self.assertEqual(p['sampler_iterations'],100)
+        self.assertEqual(p['entries_per_layer'],100000)
+        self.assertGreater(rebuild.resources(p)['minimum_available_ram_bytes'],p['candidate_rows']*4*1280*4)
+
+    def test_plan_rejects_pre_excluded_or_reordered_training(self):
+        ctx=self.context();ctx['cat']['train']=ctx['cat']['train'][1:]
+        with self.assertRaisesRegex(ValueError,'split'):rebuild.plan(ctx)
+        ctx=self.context();ctx['cat']['train'][1:3]=ctx['cat']['train'][2:0:-1]
+        with self.assertRaisesRegex(ValueError,'split'):rebuild.plan(ctx)
+
+    def test_reconstruction_must_not_overlap_original_or_prediction_tree(self):
+        ctx=self.context()
+        for key in ('source_root','data','output_root'):
+            paths=dict(ctx['paths'],rebuilt_source_root=ctx['paths'][key]/'child')
+            with self.assertRaisesRegex(ValueError,'overlaps'):rebuild.directory(paths,'MetalParts')
+        paths=dict(ctx['paths']);del paths['rebuilt_source_root']
+        with self.assertRaisesRegex(ValueError,'explicit'):rebuild.directory(paths,'MetalParts')
+
+    def test_original_record_class_uses_current_paths_without_sort_or_exclusion(self):
+        ctx=self.context()
+        for s in ctx['cat']['train']:
+            s.update(image_height=3,image_width=2)
+            path=ctx['paths']['data']/s['relative_path'];path.parent.mkdir(parents=True,exist_ok=True)
+            Image.new('RGB',(2,3)).save(path);s['image_sha256']=ip.sha(path)
+        records=rebuild.ordered_records(ctx)
+        self.assertEqual(len(records),180)
+        self.assertEqual([r.path for r in records],[str(ctx['paths']['data']/s['relative_path']) for s in ctx['cat']['train']])
+        path=Path(records[-1].path);path.write_bytes(path.read_bytes()+b'changed')
+        with self.assertRaisesRegex(ValueError,'bytes changed'):rebuild.ordered_records(ctx)
+
+    def test_validation_rejects_wrong_count_repetition_range_dtype_nonfinite(self):
+        banks={l:np.ones((3,2),np.float32) for l in ip.LAYERS}
+        indices={l:np.array([0,2,5],np.int64) for l in ip.LAYERS}
+        rebuild.validate_arrays(banks,indices,6,entries=3,dimension=2)
+        for broken in (np.array([0,0,5]),np.array([0,2,6]),np.array([0,2]),np.array([0,2,5],np.int32)):
+            with self.assertRaises(ValueError):rebuild.validate_arrays(banks,indices|{7:broken},6,entries=3,dimension=2)
+        for broken in (np.ones((2,2),np.float32),np.full((3,2),np.nan,np.float32),np.ones((3,2),np.float64)):
+            with self.assertRaises(ValueError):rebuild.validate_arrays(banks|{7:broken},indices,6,entries=3,dimension=2)
+
+    def test_rebuilt_mode_never_adopts_old_distances_even_with_same_bank_size(self):
+        ctx=self.context();ctx['paths']['source_raw_root']=self.root/'unavailable'
+        ctx['frozen']=dict(bank_size_bytes=2048000974)
+        # No old cache discovery or SHA enrollment may run for this bank origin.
+        with mock.patch.object(ip,'read_json',side_effect=AssertionError('old cache read')):
+            self.assertIsNone(cal.legacy_raw(ctx,ctx['cat']['calibration'][0],{}))
+
+    def test_production_wrapper_passes_all_records_to_original_builder_without_reseed(self):
+        from types import SimpleNamespace
+        from contextlib import nullcontext
+        ctx=self.context();records=list(range(180));events=[]
+        class Tensor:
+            def detach(self):return self
+            def float(self):return self
+            def cpu(self):return self
+            def numpy(self):return np.ones((3,2),np.float32)
+        model=SimpleNamespace(threshold_fraction=8,max_database_size=100000,layers=ip.LAYERS)
+        build=SimpleNamespace(banks={l:Tensor() for l in ip.LAYERS},
+             selected_candidate_indices={l:np.arange(3,dtype=np.int64) for l in ip.LAYERS},metadata={})
+        def load(*a):events.append('load_original_seeded_model');return model,'cuda:0'
+        def original(mm,rr,**kwargs):
+            events.append('original_builder');self.assertIs(mm,model);self.assertIs(rr,records)
+            self.assertEqual(kwargs,dict(device='cuda:0',scratch_dir=self.root/'scratch'));return build
+        cuda=SimpleNamespace(max_memory_allocated=lambda d:1,max_memory_reserved=lambda d:2,
+            get_device_name=lambda d:'fixture',empty_cache=lambda:None)
+        torch=SimpleNamespace(inference_mode=nullcontext,cuda=cuda,version=SimpleNamespace(cuda='fixture'))
+        variants=SimpleNamespace(choose_candidate_storage_backend=lambda *a,**k:{'backend':'ram'})
+        with (mock.patch.dict(sys.modules,{'torch':torch,'DINOv3.relation_reliability.superadd_host':SimpleNamespace(build_exact_official_memory=original),
+                                         'external_baselines.superadd_external.memory_variants':variants}),
+              mock.patch('external_baselines.superadd_external.memory_variants',variants,create=True),
+              mock.patch.object(rt,'load_model',side_effect=load)):
+            arrays,ix,_,_=rebuild.original_build(ctx,records,'cuda:0',20,self.root/'scratch')
+        self.assertEqual(events,['load_original_seeded_model','original_builder'])
+        np.testing.assert_array_equal(ix[7],np.arange(3));self.assertEqual(arrays[7].shape,(3,2))
+
+    def test_original_auto_decision_preserved_and_unsafe_disk_fallback_rejected(self):
+        for backend in ('ram','disk'):
+            decision={'backend':backend,'reason':'original_choice'}
+            chooser=mock.Mock(return_value=decision)
+            with mock.patch.object(rebuild.shutil,'disk_usage',return_value=type('Disk',(),{'free':1})()):
+                if backend=='disk':
+                    with self.assertRaisesRegex(MemoryError,'scratch'):rebuild.storage_admission(chooser,self.root,100)
+                else:self.assertIs(rebuild.storage_admission(chooser,self.root,100,headroom_bytes=123),decision)
+            self.assertEqual(chooser.call_count,1)
+
+    def mock_build(self,ctx):
+        banks={l:np.arange(6,dtype=np.float32).reshape(3,2) for l in ip.LAYERS}
+        indices={l:np.array([0,2,5],np.int64) for l in ip.LAYERS}
+        source=ctx['source']/'memory/anchor_sidecars.npz'
+        np.savez(source,**{f'physical_{l}':a for l,a in indices.items()})
+        return banks,indices,dict(layer_audits={str(l):dict(candidate_count=947024) for l in ip.LAYERS}),{}
+
+    def test_build_orchestration_records_new_identity_resume_and_tamper(self):
+        ctx=self.context();value=self.mock_build(ctx);validate=rebuild.validate_arrays
+        with (mock.patch.object(rebuild,'ordered_records',return_value=list(range(180))) as records,
+              mock.patch.object(rebuild,'original_build',return_value=value) as build,
+              mock.patch.object(ip,'available_ram',return_value=120<<30),
+              mock.patch.object(rebuild.shutil,'disk_usage',return_value=type('Disk',(),{'free':100<<30})()),
+              mock.patch.object(rebuild,'validate_arrays',side_effect=lambda a,b,c:validate(a,b,c,entries=3,dimension=2))):
+            result=rebuild.run(ctx,'cuda:0')
+            self.assertEqual(build.call_count,1);self.assertEqual(build.call_args.args[1],list(range(180)))
+            self.assertEqual(result['status'],'bank_reconstructed')
+            self.assertFalse(result['historical_bank_byte_identity_proven'])
+            self.assertTrue(all(v['exact_order_equal'] for v in result['historical_selected_index_audit'].values()))
+            self.assertEqual(result,rebuild.run(ctx,'cuda:0'));self.assertEqual(build.call_count,1)
+        path=rebuild.directory(ctx['paths'],'MetalParts')/'memory/official_banks.npz'
+        path.write_bytes(path.read_bytes()+b'modified')
+        with self.assertRaisesRegex(ValueError,'changed'):rebuild.run(ctx,'cuda:0')
+
+    def test_partial_or_failed_rebuild_preserved_not_approved_on_retry(self):
+        ctx=self.context();self.mock_build(ctx)
+        with (mock.patch.object(rebuild,'ordered_records',return_value=list(range(180))),
+              mock.patch.object(rebuild,'original_build',side_effect=RuntimeError('synthetic failure')),
+              mock.patch.object(ip,'available_ram',return_value=120<<30),
+              mock.patch.object(rebuild.shutil,'disk_usage',return_value=type('Disk',(),{'free':100<<30})())):
+            with self.assertRaisesRegex(RuntimeError,'synthetic'):rebuild.run(ctx,'cuda:0')
+        root=rebuild.directory(ctx['paths'],'MetalParts')
+        before=ip.sha(root/'rebuild_status.json')
+        self.assertEqual(ip.read_json(root/'rebuild_failure.json')['status'],'rebuild_failed')
+        with self.assertRaisesRegex(ValueError,'incomplete'):rebuild.run(ctx,'cuda:0')
+        self.assertEqual(before,ip.sha(root/'rebuild_status.json'))
+
+    def test_context_enrolls_reconstruction_provenance_and_rejects_changed_bank(self):
+        ctx=self.context();value=self.mock_build(ctx);validate=rebuild.validate_arrays
+        state=ctx['source']/'calibration/calibration_state.npz';state.parent.mkdir()
+        np.savez(state,mad_medians=np.zeros(4,np.float32),mad_scales=np.ones(4,np.float32))
+        ctx['cat']['source_sha256']={'calibration/calibration_state.npz':ip.sha(state)}
+        ctx['cat']['formal_sha256']={};ctx['catalog']['shared_source_files']={}
+        ctx['catalog']['categories']['MetalParts']=ctx['cat']
+        read=ip.read_json;sha=ip.sha
+        def catalog(p):return ctx['catalog'] if Path(p).name=='frozen_catalog.json' else read(p)
+        def checksum(p):return ip.CATALOG_SHA if Path(p).name=='frozen_catalog.json' else sha(p)
+        with mock.patch.object(ip,'read_json',side_effect=catalog),mock.patch.object(ip,'sha',side_effect=checksum):
+            pending=ip.context(ctx['paths'],'MetalParts')
+            self.assertEqual(pending['frozen']['bank_provenance']['bank_origin'],'explicit_reconstruction_pending')
+            with self.assertRaisesRegex(FileNotFoundError,'must complete'):ip.context(ctx['paths'],'MetalParts',enroll=True)
+            with (mock.patch.object(rebuild,'ordered_records',return_value=list(range(180))),
+                  mock.patch.object(rebuild,'original_build',return_value=value),
+                  mock.patch.object(ip,'available_ram',return_value=120<<30),
+                  mock.patch.object(rebuild.shutil,'disk_usage',return_value=type('Disk',(),{'free':100<<30})()),
+                  mock.patch.object(rebuild,'validate_arrays',side_effect=lambda a,b,c:validate(a,b,c,entries=3,dimension=2))):
+                rebuild.run(ctx,'cuda:0')
+            enrolled=ip.context(ctx['paths'],'MetalParts',enroll=True)
+            self.assertEqual(enrolled['frozen']['bank_provenance']['bank_origin'],'explicit_reconstruction_original_builder')
+            self.assertEqual(enrolled['frozen']['bank_sha256'],sha(enrolled['bank']))
+            before=sha(enrolled['root']/'inputs.json')
+            enrolled['bank'].write_bytes(enrolled['bank'].read_bytes()+b'changed')
+            with self.assertRaisesRegex(ValueError,'changed'):ip.context(ctx['paths'],'MetalParts',enroll=True)
+            self.assertEqual(before,sha(enrolled['root']/'inputs.json'))
+
+    def test_rebuild_dispatch_does_not_enroll_missing_bank_or_start_other_stages(self):
+        ctx=self.context()
+        with mock.patch.object(ip,'context',return_value=ctx) as context,mock.patch.object(rebuild,'run') as run:
+            self.assertEqual(runner.main(['rebuild-source','--rebuilt-source-root',str(self.root/'rebuilt'),'--category','MetalParts']),0)
+        self.assertEqual(context.call_args.kwargs,{})
+        self.assertEqual(run.call_count,1)
+
+    def test_model_and_builder_imports_stay_out_of_default_preflight(self):
+        script='''
+import importlib.abc,sys,json
+from unittest.mock import patch
+class Deny(importlib.abc.MetaPathFinder):
+ def find_spec(self,name,path=None,target=None):
+  if name.split('.')[0] in ('torch','torchvision'):raise RuntimeError('unexpected Torch import')
+sys.meta_path.insert(0,Deny())
+from DINOv3.MADEqual.robustad_segment_pair_crossdataset_p0 import runner,inputs
+from importlib.metadata import PackageNotFoundError
+def version(n):
+ if n in ('timm','omegaconf'):raise PackageNotFoundError(n)
+ return 'fixture'
+with patch.object(inputs,'context',side_effect=FileNotFoundError('fixture absent metadata')),patch('importlib.metadata.version',side_effect=version):
+ assert runner.main(['--rebuilt-source-root','G:/fixture_rebuild','--no-write'])==2
+assert 'torch' not in sys.modules
+'''
+        result=subprocess.run([sys.executable,'-B','-c',script],cwd=ROOT,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        data=json.loads(result.stdout)
+        self.assertNotIn('timm',data['missing_dependencies']);self.assertFalse(data['torch_imported'])
 
 
 class Cases(unittest.TestCase):
@@ -165,7 +371,7 @@ class Cases(unittest.TestCase):
 
     def test_missing_original_bank_blocks_before_torch_or_builder(self):
         ctx,_=self.fixture();ctx['bank']=self.root/'absent_original_banks.npz'
-        with self.assertRaisesRegex(FileNotFoundError,'rebuilding forbidden'):rt.load_host(ctx,'cuda:0')
+        with self.assertRaisesRegex(FileNotFoundError,'no implicit reconstruction'):rt.load_host(ctx,'cuda:0')
 
     def test_complete_capture_ignores_unavailable_external_feature_root(self):
         ctx,_=self.fixture();ctx['paths']['feature_root']=self.root/'offline_features'

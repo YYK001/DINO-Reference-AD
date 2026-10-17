@@ -35,7 +35,7 @@ Kaggle 更新代码后，官方源码路径为 `/kaggle/working/DINO-Reference-A
 
 新增工具：[运行说明](DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/README.md)、[实现审计](DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/implementation_audit.md)。冻结 UNION / SEGMENT / PAIR 三分支，包含23张Source校准恢复、逐类别/shift捕获、预测、CPU全像素评价、独立CUDA AUPRO、Source参照/ARD和分开打包。
 
-总计11个shift、1722张Target评价图、88张固定支持；不包含PiledBags。默认preflight不导入Torch、不初始化CUDA、不生成实验输出。原Source bank、patch MAD、正式元数据、图片与权重均由用户在运行端提供；没有自动重建Source memory回退。已有366张Source测试缓存的本地候选发现不代表服务器已挂载或通过原bank身份检查。
+总计11个shift、1722张Target评价图、88张固定支持；不包含PiledBags。默认preflight不导入Torch、不初始化CUDA、不生成实验输出。原Source元数据、patch MAD、图片与权重由用户在运行端提供；没有自动构库回退。原bank丢失时，经用户授权可用显式rebuild-source按原入口重建到独立根目录，新身份及23张校准/历史分数检查与旧资产分开，详见模块README。已有366张Source测试缓存的本地候选发现不代表服务器已挂载或通过原bank身份检查。
 
 本轮仅完成本地实现、CPU专项与相关回归检查；真实AutoDL模型/CUDA/指标尚未执行。完整运行示例可启用成功后关机，仅全部指标、ARD和review包成功后关机，任何失败保留现场。
 
