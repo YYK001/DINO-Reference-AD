@@ -1,6 +1,6 @@
 # DINO-Reference-AD
 
-AeBAD-S 第二章真实扰动实验的代码同步仓库。
+AeBAD-S / RobustAD 第二章真实扰动实验的代码同步仓库。
 
 本仓库包含 Source/Target-normal few-shot、Union、SEGMENT、PAIR、SPARC、FastRef、初始投影及其诊断工具，并保留它们实际调用的共享宿主、评分、评价和测试代码。依赖闭包内少量文件沿用旧目录名；它们是共享依赖，不代表将对应独立实验整套纳入本仓库。
 
@@ -31,6 +31,14 @@ Kaggle 更新代码后，官方源码路径为 `/kaggle/working/DINO-Reference-A
 
 后续顺序为：显式补缓存 → 冻结预测 → CPU 评价 → 独立原 CUDA/ADEval AUPRO。补缓存需要完整宿主所需的显存；本地能够做 CUDA 评价不等于能够运行完整模型。各步骤命令以工具 README 为准。
 
+## RobustAD MetalParts / PCB 冻结跨数据集验证
+
+新增工具：[运行说明](DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/README.md)、[实现审计](DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/implementation_audit.md)。冻结 UNION / SEGMENT / PAIR 三分支，包含23张Source校准恢复、逐类别/shift捕获、预测、CPU全像素评价、独立CUDA AUPRO、Source参照/ARD和分开打包。
+
+总计11个shift、1722张Target评价图、88张固定支持；不包含PiledBags。默认preflight不导入Torch、不初始化CUDA、不生成实验输出。原Source bank、patch MAD、正式元数据、图片与权重均由用户在运行端提供；没有自动重建Source memory回退。已有366张Source测试缓存的本地候选发现不代表服务器已挂载或通过原bank身份检查。
+
+本轮仅完成本地实现、CPU专项与相关回归检查；真实AutoDL模型/CUDA/指标尚未执行。完整运行示例可启用成功后关机，仅全部指标、ARD和review包成功后关机，任何失败保留现场。
+
 ## 代码同步
 
 在服务器建立独立代码目录，由用户执行：
@@ -48,6 +56,8 @@ git pull --ff-only
 ```
 
 已有实验资产继续保留在原目录，用显式路径传入，不移动或覆盖正式结果。此仓库由实验工作区筛选同步产生；本地发布副本与完整实验工作区分开。Git 属性禁止自动转换源码换行，保留原字节哈希和冻结身份。
+
+AutoDL 后续统一用上述独立 clone / `git pull --ff-only` 更新代码，不在旧的 DINO-NVS 资产目录强行初始化或覆盖仓库。RobustAD 的 PROJECT_ROOT 指向代码目录；SOURCE_ROOT、FORMAL_METALPARTS、FORMAL_PCB、CHECKPOINT 仍显式指向原 DINO-NVS 资产路径，OUTPUT_ROOT 使用新的独立实验目录，完整示例见该工具 README。
 
 ## 测试与依赖
 

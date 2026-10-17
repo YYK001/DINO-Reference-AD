@@ -1,6 +1,6 @@
 # 上传范围
 
-第二章代码及必要依赖：428 个文件，3.694 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
+第二章代码及必要依赖：441 个文件，6.898 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
 
 不包含数据集、图片、权重、正式 memory/MAD、缓存、结果包、实验报告或本机盘点。
 少量非 AeBAD 目录文件为实际导入依赖；未整体纳入其独立实验。
@@ -146,6 +146,18 @@ DINOv3/MADEqual/mvtec_broad6_compose2/__init__.py
 DINOv3/MADEqual/mvtec_broad6_compose2/memory.py
 DINOv3/MADEqual/mvtec_broad6_compose2/metrics.py
 DINOv3/MADEqual/mvtec_broad6_compose2/runner.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/README.md
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/__init__.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/calibration.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/evaluation.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/frozen_catalog.json
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/implementation_audit.md
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/inputs.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/prediction.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/reporting.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/runner.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/runtime.py
+DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/scripts/run_autodl.sh
 DINOv3/MADEqual/robustad_target_fewshot_p0/README.md
 DINOv3/MADEqual/robustad_target_fewshot_p0/__init__.py
 DINOv3/MADEqual/robustad_target_fewshot_p0/runner.py
@@ -199,6 +211,7 @@ DINOv3/tests/test_mad_equal_aebad_s_union_diagnostics.py
 DINOv3/tests/test_mad_equal_aebad_s_union_support_loo.py
 DINOv3/tests/test_mad_equal_mvtec_broad6_compose2.py
 DINOv3/tests/test_mad_equal_robustad_target_fewshot_p0.py
+DINOv3/tests/test_robustad_segment_pair_crossdataset_p0.py
 DINOv3/tests/test_shiftadd_aebad_s_p0.py
 external_baselines/SuperADD/CITATION.cff
 external_baselines/SuperADD/LICENSE
