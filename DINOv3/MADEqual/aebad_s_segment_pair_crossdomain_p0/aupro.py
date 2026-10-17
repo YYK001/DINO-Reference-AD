@@ -1,6 +1,7 @@
 """Explicit original CUDA ADEval continuation, never imported by preflight."""
 from __future__ import annotations
 import time
+import shutil
 import numpy as np
 from . import inputs as ip, prediction, analysis
 from .method import BRANCHES
@@ -64,6 +65,8 @@ def run(ctx,prediction_dir,cpu_directory,output,device='cuda:0',allocator_limit_
     if ip.context(ctx['paths'])['identity']!=ctx['identity']:raise ValueError('joint frozen assets changed during AUPRO')
     rows=analysis.append_macro(rows)
     ip.write_csv(out/'metrics.csv',rows);ip.write_csv(out/'metric_comparisons.csv',analysis.metric_comparisons(rows))
+    for name in ('historical_score_audit.json','historical_baseline_comparison.csv'):
+        shutil.copyfile(cpu/name,out/name)
     analysis.write_report(out,rows,ip.csv_file(cpu/'ranking_summary.csv'),
         _numeric(ip.csv_file(cpu/'mechanism_summary.csv')), _numeric(ip.csv_file(cpu/'margin_repair_summary.csv')),pm['domains'])
     from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.evaluation import peak_rss
@@ -79,7 +82,8 @@ def run(ctx,prediction_dir,cpu_directory,output,device='cuda:0',allocator_limit_
     ip.write_json(out/'result_manifest.json',manifest)
     ip.write_json(out/'status.json',dict(tool=ip.TOOL,status='all_requested_metrics_complete',identity=ctx['identity'],
         domains=pm['domains'],images=len(samples),all_metrics_complete=True,joint_domains_complete=set(pm['domains'])==set(ip.DOMAINS),
-        result_manifest_sha256=ip.sha(out/'result_manifest.json'),model_inference=False,feature_extraction=False))
+        result_manifest_sha256=ip.sha(out/'result_manifest.json'),model_inference=False,feature_extraction=False,
+        historical_score_audit=ip.read_json(out/'historical_score_audit.json')))
     return out
 
 

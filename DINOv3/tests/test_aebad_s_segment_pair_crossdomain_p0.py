@@ -133,6 +133,45 @@ class PairTests(unittest.TestCase):
 
 
 class IntegrationTests(TemporaryCase):
+    def test_historical_small_drift_passes_predict_and_evaluate_with_honest_audit(self):
+        ctx,_=self.fixture()
+        for domain in ip.DOMAINS:
+            for s in ctx['catalog']['domains'][domain]['samples']:
+                s['source_score']+=2e-5;s['union_score']+=2e-5
+        pred=self.root/'pred';cpu=self.root/'cpu'
+        with mock.patch.object(ip,'context',return_value=ctx):
+            capture.run(ctx,list(ip.DOMAINS)) # complete synthetic cache: no model or Torch
+            pr.run(ctx,pred,list(ip.DOMAINS),1)
+            an.run(ctx,pred,cpu,1,1<<30)
+        for path in (ctx['paths']['cache_root']/'cache_status.json',pred/'status.json',cpu/'status.json'):
+            report=ip.read_json(path)['historical_score_audit']
+            self.assertFalse(report['historical_strict_reproduction'])
+            self.assertEqual(report['rejected_checks'],0)
+            self.assertGreater(report['compatibility_warning_checks'],0)
+        comparison=ip.csv_file(cpu/'historical_baseline_comparison.csv')
+        self.assertFalse(ip.read_json(pred/'status.json')['Source_Union_CURRENT_verified'])
+        self.assertTrue(ip.read_json(pred/'status.json')['Source_Union_CURRENT_compatible'])
+        self.assertEqual(len(comparison),4)
+        self.assertTrue(all(float(r['mean_signed_score_error'])<0 for r in comparison))
+        self.assertTrue(all(int(r['changed_pairs'])==0 for r in comparison))
+        self.assertTrue(all(r['score_rule']=='CURRENT_not_CH1' for r in comparison))
+        an.verified_analysis(ctx,pred,cpu)
+
+    def test_historical_drift_above_fixed_compatibility_bound_still_fails(self):
+        ctx,_=self.fixture();ctx['catalog']['domains']['illumination']['samples'][0]['union_score']+=2e-4
+        with self.assertRaisesRegex(ValueError,'compatibility'):pr.run(ctx,self.root/'fail',['illumination'],1)
+        self.assertFalse((self.root/'fail/prediction_manifest.json').exists())
+
+    def test_same_run_map_drift_2e_minus5_is_not_given_historical_tolerance(self):
+        ctx,_=self.fixture();pred=self.root/'pred'
+        with mock.patch.object(ip,'context',return_value=ctx):pr.run(ctx,pred,['illumination'],1)
+        original=an.score_maps
+        def changed(*a,**k):
+            current,ch1,response,error=original(*a,**k)
+            return current,ch1,response+2e-5,error
+        with mock.patch.object(an,'score_maps',side_effect=changed),mock.patch.object(ip.Data,'gt',side_effect=AssertionError('GT entered')):
+            with self.assertRaisesRegex(ValueError,'backend changed'):an.run(ctx,pred,self.root/'fail',1,1<<30)
+
     def test_original_observer_capture_integration_with_explicit_model_boundary_mocks(self):
         self._capture_boundary(False)
 
@@ -353,6 +392,8 @@ class IntegrationTests(TemporaryCase):
         self.assertEqual(backend.call_count,6)
         self.assertTrue(all(c.kwargs['nstrips']==200 for c in backend.call_args_list))
         self.assertTrue(ip.read_json(out/'status.json')['all_metrics_complete'])
+        self.assertEqual((out/'historical_score_audit.json').read_bytes(),(cpu/'historical_score_audit.json').read_bytes())
+        self.assertEqual((out/'historical_baseline_comparison.csv').read_bytes(),(cpu/'historical_baseline_comparison.csv').read_bytes())
         self.assertEqual(ip.read_json(cpu/'status.json')['status'],'cpu_evaluation_complete_aupro_pending')
 
     def test_optional_original_distance_semantics_and_hash(self):
@@ -427,6 +468,31 @@ class AccountingTests(unittest.TestCase):
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_actual_reported_T4_score_differences_are_accepted_but_not_strict(self):
+        from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0.verification import historical_score,audit
+        rows=[];sample=dict(domain='illumination',sample_id='test_0240')
+        for kind,actual,expected in [('SOURCE_CURRENT',5.387515068054199,5.3875346183776855),
+                                     ('UNION_CURRENT',5.044580459594727,5.0445966720581055)]:
+            self.assertTrue(historical_score(rows,sample,kind,actual,expected))
+            self.assertFalse(rows[-1]['strict_verified']);self.assertLess(rows[-1]['signed_error'],0)
+        report=audit(rows);self.assertEqual(report['strict_failed_checks'],2);self.assertEqual(report['rejected_checks'],0)
+        loaded=[{k:str(v) for k,v in r.items()} for r in rows]
+        self.assertEqual(audit(loaded),report)
+
+    def test_nonfinite_historical_scores_never_pass(self):
+        from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0.verification import historical_score
+        for a,b in [(float('nan'),1),(1,float('inf')),(float('inf'),float('inf'))]:
+            rows=[]
+            self.assertFalse(historical_score(rows,dict(domain='view',sample_id='bad'),'SOURCE_CURRENT',a,b))
+            self.assertFalse(rows[-1]['strict_verified']);self.assertIsNone(rows[-1]['max_abs_error'])
+
+    def test_compatibility_policy_changes_identity_not_extraction(self):
+        ctx=ip.context(ip.defaults(ROOT),verify_data=False)
+        with mock.patch.dict(ip.PROTOCOL,{'historical_score_atol':1e-5}):
+            other=ip.context(ip.defaults(ROOT),verify_data=False)
+        self.assertNotEqual(ctx['identity'],other['identity'])
+        self.assertEqual(ctx['extraction_identity'],other['extraction_identity'])
+
     def test_default_and_explicit_model_guard_and_invalid_values(self):
         self.assertEqual(runner.parser().parse_args([]).capture_min_free_vram_gib,20)
         self.assertEqual(runner.parser().parse_args(['capture','--capture-min-free-vram-gib','14']).capture_min_free_vram_gib,14)

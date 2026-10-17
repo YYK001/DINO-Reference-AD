@@ -16,6 +16,7 @@ DOMAINS=('illumination','view')
 CATALOG_SHA='3a0082fa6c75e4b04b4c0c4b7be27287afb7422157b3357c79eeafbb133af77c'
 PROTOCOL=dict(tool=TOOL,domains=list(DOMAINS),branches=list(BRANCHES),layers=list(LAYERS),seed=42,
     distance_unit='euclidean_over_1280_once',distance_atol=1e-7,distance_rtol=1e-6,score_atol=1e-5,score_rtol=0,
+    historical_score_policy='cross_environment_fixed_atol_v1',historical_score_atol=1e-4,
     candidate='stable_top2_different_supports_manifest_order',geometry='original_geometry_layer_bounded_distances',
     pair_radius=1,pair_votes='ceil(actual_neighbors/2)',exclude_center=True,padding=False,no_neighbors='full_union',
     support_coordinate_constraint=False,normalization=None,image_score='frozen_Source_CH1_peak_local_0.5_0.5',

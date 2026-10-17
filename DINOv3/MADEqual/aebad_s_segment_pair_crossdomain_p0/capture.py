@@ -11,13 +11,14 @@ from . import inputs as ip
 from .method import LAYERS,add_geometry,scatter
 from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.scoring import statistics
 from DINOv3.MADEqual.aebad_s_projection_layer_diagnostic.numerics import check
+from .verification import historical_score, audit
 
 
 def verify_scores(ctx,sample,source,union,positions,meta,checks):
     for branch,value,key in (('SOURCE_CURRENT',source,'source_score'),('UNION_CURRENT',union,'union_score')):
         current=statistics(value,positions,tuple(meta['grid']),tuple(meta['output_shape']),ctx['medians'],ctx['scales'])[0]
-        check(checks,sample['sample_id'],branch,current,sample[key],domain=sample['domain'])
-    if not all(r['verified'] for r in checks[-2:]):raise ValueError('Source/Union CURRENT reproduction failed; no tolerance relaxation')
+        historical_score(checks,sample,branch,current,sample[key])
+    if not all(r['verified'] for r in checks[-2:]):raise ValueError('Source/Union CURRENT exceeds frozen historical compatibility tolerance 1e-4')
     from .references import verify
     verify(ctx,sample,source,union,positions,meta,checks)
 
@@ -76,6 +77,7 @@ def run(ctx,domains,*,device_name='cuda:0',query_features=None,support_features=
     state.setdefault('invocations',[]).append(invocation)
     def commit():
         state.update(tool=ip.TOOL,identity=ctx['identity'],status='partial_cache_verified',last_invocation_counts=counters)
+        state['historical_score_audit']=audit(checks)
         ip.write_json(root/'cache_status.json',state);ip.write_csv(root/'capture_verification.csv',checks)
     commit()
     try:

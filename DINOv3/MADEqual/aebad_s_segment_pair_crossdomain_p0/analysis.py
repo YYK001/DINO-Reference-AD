@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 from . import inputs as ip
 from . import prediction
+from .verification import historical_score,audit
 from .method import BRANCHES,LAYERS,U,S,P
 from DINOv3.MADEqual.aebad_s_neighborhood_segment_p0.analysis import score_maps,peak_position,array_sha,verify_map_record
 from DINOv3.MADEqual.aebad_s_neighborhood_segment_p0.prediction import bounded_images,protect_dependencies
@@ -195,7 +196,7 @@ def run(ctx,prediction_dir,output,workers=4,memory_budget=8<<30):
             for b,(current,ch1,response,error) in scored.items():
                 check(local,sample['sample_id'],'actual_map_CURRENT_'+b,float(response.max()),current,domain=domain)
                 check(local,sample['sample_id'],'frozen_prediction_CH1_'+b,ch1,frozen_scores[(domain,sample['sample_id'],b)],domain=domain)
-            check(local,sample['sample_id'],'actual_Union_map_historical_CURRENT',float(maps[U].max()),sample['union_score'],domain=domain)
+            historical_score(local,sample,'actual_Union_map_historical_CURRENT',float(maps[U].max()),sample['union_score'])
             if not all(r['verified'] for r in local):
                 failure=out/'failures';failure.mkdir(exist_ok=True)
                 ip.write_json(failure/f'{sample["domain"]}_{sample["sample_id"]}.json',dict(checks=local))
@@ -249,6 +250,8 @@ def run(ctx,prediction_dir,output,workers=4,memory_budget=8<<30):
         'gate_statistics.csv':ip.csv_file(pred/'gate_statistics.csv'),
         'background_development_reference.csv':[dict(r,domain='background',role='development_reference_not_in_macro') for r in ctx['catalog']['background_reference']['rows']]}
     for name,rows in tables.items():ip.write_csv(out/name,rows)
+    ip.write_json(out/'historical_score_audit.json',audit(checks))
+    ip.write_csv(out/'historical_baseline_comparison.csv',historical_comparisons(ctx,samples,checks))
     from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.evaluation import peak_rss
     ip.write_json(out/'timing.json',dict(seconds=time.perf_counter()-started,stage_seconds=costs,process_peak_rss_bytes=peak_rss(),
         exact_sort_budget_bytes=memory_budget,cpu_workers=workers,new_output_bytes=sum(p.stat().st_size for p in out.rglob('*') if p.is_file()),
@@ -260,7 +263,7 @@ def run(ctx,prediction_dir,output,workers=4,memory_budget=8<<30):
     ip.write_json(out/'status.json',dict(tool=ip.TOOL,identity=ctx['identity'],status='cpu_evaluation_complete_aupro_pending',domains=domains,
         images=len(samples),numerical_failed_checks=0,GT_used_only_after_prediction_frozen=True,all_metrics_complete=False,
         joint_domains_complete=set(domains)==set(ip.DOMAINS),analysis_manifest_sha256=ip.sha(out/'analysis_manifest.json'),
-        historical_distance_reproduction='not_claimed_without_original_reference_arrays'))
+        historical_distance_reproduction='not_claimed_without_original_reference_arrays',historical_score_audit=audit(checks)))
     return out
 
 
@@ -299,8 +302,38 @@ def write_report(out,metrics,rankings,mechanisms,repairs,domains):
     lines+=['','只有两域全部完成，才可据逐域及二域等权 macro 判断是否重复有效；单域结果不能替代另一域。',
         '是否主要适合 background，应分别对照上表的逐域收益/损失；接近 Union 不等于超过 Union，也不表示超过 SOTA。',
         '小实例为各新域原图面积最小 ceil(N/4)，包含映射消失/空环带；不与 background 三个最小实例混口径，不把标注碎片断言为独立物理缺陷。',
-        '历史 CURRENT 仅用于宿主复现。若无原始距离参照，只核验分数，不能宣称原距离逐元素复现。']
+        '历史 CURRENT 按固定跨环境绝对容差 1e-4 核验；原 1e-5 检查结果单独保留。兼容通过不等于严格历史复现或指标完全相同。',
+        '历史分数偏差见 historical_score_audit.json，CURRENT 指标与排序变化见 historical_baseline_comparison.csv。',
+        '若无原始距离参照，只核验分数，不能宣称原距离逐元素复现。']
     (out/'objective_report.md').write_text('\n'.join(lines)+'\n',encoding='utf8')
+
+
+def historical_comparisons(ctx,samples,checks):
+    """Evaluation-only audit: current vs historical CURRENT, not CH1 metrics."""
+    lookup={(r['domain'],r['sample_id'],r['check_kind']):r for r in checks
+            if r['check_kind'] in ('SOURCE_CURRENT','UNION_CURRENT')}
+    rows=[]
+    for domain in dict.fromkeys(s['domain'] for s in samples):
+        selected=[s for s in samples if s['domain']==domain]
+        labels=np.asarray([s['label'] for s in selected])
+        for branch in ('SOURCE_CURRENT','UNION_CURRENT'):
+            records=[lookup[(domain,s['sample_id'],branch)] for s in selected]
+            actual=np.asarray([r['actual_score'] for r in records],float)
+            old=np.asarray([r['historical_score'] for r in records],float)
+            now_metric,old_metric=image_metrics(labels,actual),image_metrics(labels,old)
+            now_pairs,old_pairs=pair_errors(labels,actual),pair_errors(labels,old)
+            delta=actual-old
+            rows.append(dict(domain=domain,branch=branch,images=len(selected),
+                max_abs_score_error=float(np.abs(delta).max()),mean_abs_score_error=float(np.abs(delta).mean()),
+                mean_signed_score_error=float(delta.mean()),
+                strict_failed_images=sum(not r['strict_verified'] for r in records),
+                **{k:now_metric[k] for k in now_metric},
+                **{'historical_'+k:old_metric[k] for k in old_metric},
+                **{'delta_'+k:now_metric[k]-old_metric[k] for k in now_metric},
+                changed_pairs=int((now_pairs!=old_pairs).sum()),improved_pairs=int((now_pairs<old_pairs).sum()),
+                worsened_pairs=int((now_pairs>old_pairs).sum()),delta_weighted_pair_errors=float((now_pairs-old_pairs).sum()),
+                direction='current_run_minus_historical',metric_units='fraction',score_rule='CURRENT_not_CH1'))
+    return rows
 
 
 def verified_analysis(ctx,prediction_dir,directory):

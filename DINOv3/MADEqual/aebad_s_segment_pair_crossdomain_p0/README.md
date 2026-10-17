@@ -2,6 +2,16 @@
 
 本工具迁移 background 已确定的规则，使用每个新域原先的八张正常支持，检验图像收益与定位损失能否重复。不重新选支持、不选参数，不把新域称为完全盲测，也不把接近 Union 写成超过 Union 或 SOTA。
 
+## 2026-10-17：Kaggle 跨环境历史分数复核
+
+本轮用户选择从头运行，历史 CURRENT 分数的准入改为固定 `atol=1e-4, rtol=0`，在新运行前写入协议和 joint identity。它仅用于 Source/Union 与历史 CSV 的分数比较，不改变三分支算法、提取、原 Exact 检索、MAD、插值、CH1 或评价；不根据指标选择该值，也不在运行中自动提高。新运行必须使用新目录，旧失败缓存与结果保持原样，不能混用旧 identity。
+
+原因：用户提供的 T4 运行在第42张 `illumination/test_0240` 上出现 Source `1.95503235e-5`、Union `1.62124634e-5` 的历史分数绝对偏差。CPU 对照中使用原 Torch 插值仍超出原 `1e-5`，所以没有更改插值实现。此次改动是明确的跨环境验收规则调整，不是已经定位或消除了数值差异；不能把兼容通过写成原严格复现通过。
+
+`capture / predict / evaluate` 共用这项规则。每次历史复核记录实际分数、历史分数、有符号误差、原 `1e-5` 的 `strict_verified` 和新门槛的 `verified`。`1e-5 < error <= 1e-4` 标为 `compatibility_warning` 并继续；超过 `1e-4`、NaN/Inf、同次计算不一致、文件身份/哈希变化、缺图/GT等仍阻断。所有同运行内部数值检查保留原容差。
+
+输出 `historical_score_audit.json`（capture 中放在 `cache_status.json.historical_score_audit`），区分严格失败与兼容拒绝。CPU评价额外输出 `historical_baseline_comparison.csv`，对 Source/Union CURRENT 分别计算本次与历史的 Image AUROC/AP、有符号分数偏差及正常—异常排序变化；它不是 CH1 指标表，也不是历史像素指标复现。AUPRO和分域汇总继续携带这两份审计结果。是否影响结论由这些实际结果判断，不预先宣称差异无影响。
+
 本轮仅完成实现、真实输入只读盘点、CPU 轻量验证。**没有执行两域正式提取、推理或评价。** 本地已有 CUDA 评价能力不意味着能运行完整 DINOv3。盘点见 `input_inventory_local.json`，复用依据见 `implementation_audit.md`。
 
 ## 冻结范围
@@ -48,7 +58,7 @@
 
 如另有原始 Q/支持缓存，使用 `--query-feature-dir / --support-feature-dir`，目录须有来源历史 `manifest.json`，包含 `format=original_query_features_v1 / original_support_features_v1`、`status=verified`、预检的 `extraction_identity`，以及 records 中的域、sample_id 或 support_index、原路径、图像 SHA、相对文件名和历史文件 SHA。**不得仅为通过检查给无来源文件现算哈希并自称 verified。** Q 使用 `layer_7/15/23/31` 原 float32 [N,1280]、完整 int64 positions；metadata 记完整提取身份、原始单位、grid、processed_shape、output_shape。支持使用原 `protocol_id/relative_path/grid/layer_*` 格式。预检只读取，不执行补提取。
 
-可选 `--distance-reference-root` 接收原 Few-shot observation 缓存的独立历史来源清单：`format=formal_fewshot_distance_reference_v1`，`status=verified`，原 protocol/cache_revision，原 memory SHA、正式 sample_scores SHA、冻结 query/precision 和逐图 records（domain/sample_id/relative_path/image_sha256/file/sha256）。NPZ 直接保留原 `official_raw / target_raw_8 / output_shape` 等字段。程序核对 Source/Union **物理网格距离**，容差 atol=1e-7、rtol=1e-6。没有这个输入时只宣称 CURRENT 分数复现；不能宣称历史距离逐元素一致。
+可选 `--distance-reference-root` 接收原 Few-shot observation 缓存的独立历史来源清单：`format=formal_fewshot_distance_reference_v1`，`status=verified`，原 protocol/cache_revision，原 memory SHA、正式 sample_scores SHA、冻结 query/precision 和逐图 records（domain/sample_id/relative_path/image_sha256/file/sha256）。NPZ 直接保留原 `official_raw / target_raw_8 / output_shape` 等字段。程序核对 Source/Union **物理网格距离**，容差 atol=1e-7、rtol=1e-6。没有这个输入时只核验 CURRENT 分数兼容性；不能宣称历史距离逐元素一致。
 
 ## 阶段和输出
 

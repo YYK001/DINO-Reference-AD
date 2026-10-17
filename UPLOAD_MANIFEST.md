@@ -1,6 +1,6 @@
 # 上传范围
 
-第二章代码及必要依赖：427 个文件，3.680 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
+第二章代码及必要依赖：428 个文件，3.694 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
 
 不包含数据集、图片、权重、正式 memory/MAD、缓存、结果包、实验报告或本机盘点。
 少量非 AeBAD 目录文件为实际导入依赖；未整体纳入其独立实验。
@@ -82,6 +82,7 @@ DINOv3/MADEqual/aebad_s_segment_pair_crossdomain_p0/prediction.py
 DINOv3/MADEqual/aebad_s_segment_pair_crossdomain_p0/references.py
 DINOv3/MADEqual/aebad_s_segment_pair_crossdomain_p0/runner.py
 DINOv3/MADEqual/aebad_s_segment_pair_crossdomain_p0/summary.py
+DINOv3/MADEqual/aebad_s_segment_pair_crossdomain_p0/verification.py
 DINOv3/MADEqual/aebad_s_sparc_p0/README.md
 DINOv3/MADEqual/aebad_s_sparc_p0/__init__.py
 DINOv3/MADEqual/aebad_s_sparc_p0/analysis.py

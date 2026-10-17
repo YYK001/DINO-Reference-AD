@@ -2,6 +2,18 @@
 
 日期：2026-10-16。工程根目录：`G:\codex\workspace\experiment`。仅新增独立模块与专项测试，未改旧 Python、历史报告、memory、MAD 或正式结果。本轮未连接服务器、未运行真实模型或 CUDA。
 
+## 2026-10-17 更新：固定跨环境分数验收规则
+
+以下更新替代本文早期“历史分数绝对容差1e-5立即阻断”的行为；内部数值复核与可选原距离复核不变。用户要求从头运行，本轮固定历史 Source/Union CURRENT 准入 `atol=1e-4, rtol=0`，保留原1e-5检查作为严格复现审计。`verification.historical_score` 在 capture、predict、evaluate 统一使用；不改历史CSV，不修改旧失败记录，不抬高全局数值容差。
+
+用户提供的实测：T4/Torch2.11 在 illumination/test_0240 的 Source/Union 分数偏差分别1.95503235e-5和1.62124634e-5；原Torch CPU插值对照仍偏离历史2.00271606e-5和1.57356262e-5。无法仅归因于NumPy插值，尚未确认上游具体原因。1e-4是此轮重启前明确冻结的兼容验收界限，不是模型参数，不代表所有误差已被证明无影响，也不自动随失败增大。
+
+协议新字段纳入joint identity；同一图像/特征提取身份保持不变，新旧运行不可混用。逐条保留actual/historical/signed_error、strict_verified和compatibility_warning；状态分别报告历史严格复现及兼容拒绝数量。正式指标完成状态只表明按本轮验收规则完整运行，不能替代strict字段。
+
+CPU评价新增Source/Union CURRENT本次对历史的图像AUROC/AP、排序和有符号误差表；三分支正式比较仍全部使用同一当前环境重新计算。AUPRO及分域汇总携带审计文件。未执行真实GPU或两域全量实验；已提供实测的两项误差仅用于测试验收分支，不冒充模型复测。
+
+本地现有环境专项44项通过（11.914秒）：实测分数对的兼容/严格双记录；小偏差贯穿完整缓存复核、预测和CPU评价；大偏差仍拒绝；NaN/Inf拒绝；内部地图2e-5漂移仍被原容差拒绝；身份隔离；AUPRO审计文件传递；CPU导入不进入Torch。原background12张668352层×patch的距离/门控逐元素一致，36项CH1分数最大误差0。模型、CUDA、Exact边界及AUPRO后端仍是明确替身，未作真实环境验证。
+
 ## 调用链与解除 background 限定
 
 | 环节 | 实际复用入口（相对上述根目录） | 新封装的责任 |

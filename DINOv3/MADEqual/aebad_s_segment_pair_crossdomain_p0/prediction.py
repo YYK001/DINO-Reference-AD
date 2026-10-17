@@ -7,6 +7,7 @@ import numpy as np
 from . import inputs as ip
 from .method import predict as kernel,BRANCHES,LAYERS,U,S,P,pair_gate
 from .capture import load_cached,verify_scores
+from .verification import audit
 from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.scoring import statistics,ch1_score
 from DINOv3.MADEqual.aebad_s_neighborhood_segment_p0.prediction import bounded_images,protect_dependencies
 
@@ -57,11 +58,12 @@ def run(ctx,output,domains,workers=4):
         prediction.append(record);checks.extend(local);scores.extend(sc);stats.extend(st)
         print(f'[crossdomain predict] {record["domain"]} {record["sample_id"]}',flush=True)
     ip.write_csv(out/'numerical_verification.csv',checks);ip.write_csv(out/'prediction_scores.csv',scores);ip.write_csv(out/'gate_statistics.csv',stats)
+    ip.write_json(out/'historical_score_audit.json',audit(checks))
     if not checks or not all(r['verified'] for r in checks):raise ValueError('numerical reproduction did not pass')
     if ip.context(ctx['paths'])['identity']!=ctx['identity']:raise ValueError('joint freeze changed during prediction')
     ip.cache_state(ctx) # verify original per-image history, not newly approved hashes
     manifest=dict(tool=ip.TOOL,identity=ctx['identity'],domains=list(domains),records=prediction,images=len(samples),
-                  files={n:ip.sha(out/n) for n in ('protocol.json','input_manifest.json','prediction_scores.csv','gate_statistics.csv','numerical_verification.csv')},
+                  files={n:ip.sha(out/n) for n in ('protocol.json','input_manifest.json','prediction_scores.csv','gate_statistics.csv','numerical_verification.csv','historical_score_audit.json')},
                   GT_used=False,labels_used_by_method=False,geometry_verified=True,
                   historical_distance_verification=dict(available=ctx.get('distance_references') is not None,
                     verified_checks=sum(r['check_kind'].startswith('original_') for r in checks),
@@ -71,7 +73,9 @@ def run(ctx,output,domains,workers=4):
     ip.write_json(out/'timing.json',dict(seconds=time.perf_counter()-started,cpu_workers=workers,model_inference=False,feature_extraction=False,
                                        process_peak_rss_bytes=peak_rss(),new_output_bytes=sum(p.stat().st_size for p in out.rglob('*') if p.is_file()),environment=ip.common.environment()))
     ip.write_json(out/'status.json',dict(tool=ip.TOOL,status='predictions_frozen',identity=ctx['identity'],domains=list(domains),images=len(samples),
-                                       prediction_manifest_sha256=ip.sha(out/'prediction_manifest.json'),GT_used=False,Source_Union_CURRENT_verified=True))
+                                       prediction_manifest_sha256=ip.sha(out/'prediction_manifest.json'),GT_used=False,Source_Union_CURRENT_compatible=True,
+                                       Source_Union_CURRENT_verified=audit(checks)['historical_strict_reproduction'],
+                                       historical_score_audit=audit(checks)))
     return out
 
 
