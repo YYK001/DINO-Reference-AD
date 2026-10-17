@@ -12,7 +12,7 @@
 | Source bank | `relation_oracle_cache.extract.install_category_banks` | 先验 NPZ float32、各层 100000×1280，再调用安装；默认原v6树，无builder fallback；授权后显式重建走独立来源/目录 |
 | 支持特征 | `robustad_target_fewshot_p0.support._extract_four_layers`，实际来源为 `DINOv3/ShiftADD/aebad_s_p0/memory.py` | 原始 1280 维行，支持自身的真实网格；无抽样、归一化或统一网格要求 |
 | Target 捕获 | `robustad_target_fewshot_p0.scoring.observe_fewshot_pil`；`aebad_s_union_support_loo.analysis.CaptureLog` | 单张完整 query 一次原提取，nearest/geometry 回调复制同次完整检索，source_support=None；逐层 Source+八支持，没有 Source-extra |
-| Source 观测 | `relation_reliability.superadd_host.observe_pil` | Source 校准与 Source 测试独立沿用原 Source 路径（其原单 crop batch=1）；Target 沿用原 Few-shot 完整切窗 batch。没有为省显存改变任一路径 |
+| Source 观测 | `relation_reliability.superadd_host.observe_pil` | 每图batch=1；原校准传`include_identity_descriptors=True`（crop batch2），Source测试传False（全部crop）；Target沿用原Few-shot完整切窗batch。2026-10-18修复初版校准漏传True，不把图像batch与crop batch混为一谈 |
 | Exact | `superadd_host._exact_top1_chunked` | 原 cdist 设置和 chunk；原欧氏距离 /1280 一次。仅额外计时包装，不改变输入/返回值 |
 | 线段几何 | `aebad_s_segment_pair_crossdomain_p0.method.add_geometry` → `aebad_s_target_local_segment.geometry.geometry_layer / bounded_distances` | 原 float64 三边几何、舍入界与失败处理；保存完整端点索引、来源、alpha、长度和校正诊断。不改变误差界或裁零规则 |
 | PAIR | `aebad_s_segment_pair_crossdomain_p0.method.predict / pair_gate` | 原 radius1、实际邻居票数、稳定 Top2；按完整物理 positions 还原，MetalParts 非方形网格不被当成方形 |
@@ -98,3 +98,15 @@ Source 恢复/模型加载、特征提取、Exact、支持处理、几何、CPU 
 本轮新增重建的CPU输入/顺序/索引/状态/身份验证；GPU构库与模型以替身隔离，测试不证明真实Torch/CUDA构库通过。保持原SEGMENT/PAIR数学和评价专项回归。真实两类重建、23张校准、历史分数及全域指标均未执行。
 
 重建入口接入后的最终本地专项：39项通过；包含原CPU阶段回归、实际生产包装函数的替身调用、独立重建身份登记/篡改拒绝、原auto决策与磁盘空间防护。10个Python文件AST及Bash -n通过。默认preflight禁导入Torch测试通过。真实构库、校准与指标均未执行。
+
+## 2026-10-18：Source校准路径修复
+
+首次用户服务器日志显示两类重建用时232.654s/390.477s，L7/L15/L23/L31全部100K索引逐顺序匹配旧sidecar。MetalParts校准patch数量及CPU_vs_original_peak/local均通过；历史MAD核验失败三项，最大scale差9.0897e-6。此处为用户执行日志证据，不是本地模型实验。
+
+实际代码发现：原`runner._fit_reliability`传`include_identity_descriptors=True`，本工具初版`runtime.source_observation`未传，默认False。共享`patched_features_and_relations`因此使用不同crop batch（2/全部）。这是一项确定的接入偏差；不能未修复路径就把失败归为环境噪声或仅提高容差。修正只对校准传True，Source测试继续False；原库、采样、MAD和评分均不变。真实数值是否恢复尚待服务器复核。
+
+为避免无效重建，`rebuild.verify`支持精确限定的96d4981生产者迁移：已知旧完整代码映射指纹；非代码计划完全相同；除了runtime/rebuild两文件的其余代码SHA完全相同；runtime除source_observation外、rebuild除verify/snapshot/兼容验证函数外的完整模块AST均等于原基线。生成路径（含imports、全局常量、model loader、原构库调用、存储、保存与数量验证）不能变化。仍核对原清单plan_identity及bank/索引历史SHA，不修改旧清单。新生产者不获得任意跨版本豁免。
+
+新OUTPUT_ROOT登记旧bank清单SHA与兼容角色，旧OUTPUT_ROOT因代码身份不同仍拒绝续跑。旧23张校准不能携带到新输出；不重标错误缓存为新协议。后续只需重新校准，不必重建bank。新增测试覆盖原校准True/Source测试False、crop策略记录、合法bank只读复用、未知生产者/配置/依赖/生成函数变化拒绝及文件修改拒绝。局部模型/描述符统计使用替身；没有本地Torch/CUDA真实链路验证。
+
+最终43项专项测试通过（11.707s），10个Python文件AST、Bash -n和已知旧构库指纹/生成AST兼容检查通过。兼容AST只去除Python3.12新增的空type_params字段，避免本机Python3.11与服务器3.12的空语法字段差异导致误拒；非空语义变化仍拒绝，测试通过模拟该结构覆盖，未执行真实Python3.12模型。真实修正校准与正式实验仍待用户在服务器执行。

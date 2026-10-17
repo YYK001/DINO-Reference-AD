@@ -98,15 +98,21 @@ def profile_original(module,device,timing,prefix):
 def source_observation(ctx,sample,model,device,timing=None):
     from DINOv3.relation_reliability.superadd_host import observe_pil,preprocessed_spatial_shape
     from DINOv3.relation_reliability import superadd_host
+    # Original v6 _fit_reliability enables descriptors. Besides the side output,
+    # this freezes crop microbatches to 2; feature-only mode batches ALL crops.
+    # Source test evaluation originally uses feature-only mode and stays so.
+    calibration=sample.get('source_role')=='calibration'
     with profile_original(superadd_host,device,timing if timing is not None else {},'Source'):
-        observed=observe_pil(model,ip.image(ctx,sample),device=device)
+        observed=observe_pil(model,ip.image(ctx,sample),device=device,include_identity_descriptors=calibration)
     raw=observed.raw_distances;grid=tuple(observed.grid)
     arrays=dict(positions=np.arange(int(np.prod(grid)),dtype=np.int64),source_distance=raw.reshape(4,-1).copy(),
                 source_index=observed.top1_indices.reshape(4,-1).astype(np.int64))
     meta=dict(grid=list(grid),processed_shape=list(preprocessed_spatial_shape(model,sample['image_height'],sample['image_width'])),
-              output_shape=[sample['image_height']//4,sample['image_width']//4],action='original_Source_observe_pil')
+              output_shape=[sample['image_height']//4,sample['image_width']//4],action='original_Source_observe_pil',
+              include_identity_descriptors=calibration,forward_image_batch=1,
+              crop_batch_policy='original_identity_descriptors_2' if calibration else 'original_feature_only_all_crops')
     validate_source(arrays,meta,sample)
-    if sample.get('source_role')=='calibration':
+    if calibration:
         from DINOv3.MADEqual.image_granularity_calibration.scoring import interpolated_layer_maxima
         from DINOv3.MADEqual.connected_region.scoring import local_mean
         from DINOv3.relation_oracle_cache.extract import mad_calibrated

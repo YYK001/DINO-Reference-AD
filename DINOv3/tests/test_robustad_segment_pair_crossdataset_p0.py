@@ -52,11 +52,54 @@ class Reconstruction(unittest.TestCase):
         self.assertEqual(p['entries_per_layer'],100000)
         self.assertGreater(rebuild.resources(p)['minimum_available_ram_bytes'],p['candidate_rows']*4*1280*4)
 
+    @staticmethod
+    def legacy_plan(current):
+        prior=copy.deepcopy(current);prefix='DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/'
+        prior['code'][prefix+'runtime.py']='339385e15d90b3cb8831ee9586eaf6a7c8309d20f6af3a2f4530ee8f1bb01edc'
+        prior['code'][prefix+'rebuild.py']='1d47dfd6eb0cfe7b32da3703af0894ec3a4e9026cf97ab650c4247cb4947e7d1'
+        return prior
+
+    def test_known_legacy_bank_plan_reuse_is_limited_to_unchanged_generation(self):
+        current=rebuild.plan(self.context());prior=self.legacy_plan(current)
+        self.assertEqual(ip.digest(prior['code']),'48fc11a1af3db200900249338945457e9fe9ebff9f4b12d2976643c3005346a1')
+        self.assertTrue(rebuild._legacy_plan_compatible(prior,current))
+        for key,value in (('seed',43),('entries_per_layer',99999),('candidate_rows',1),('checkpoint_sha256','changed')):
+            changed=copy.deepcopy(current);changed[key]=value
+            self.assertFalse(rebuild._legacy_plan_compatible(prior,changed))
+        changed=copy.deepcopy(current);changed['train'][0]['image_sha256']='changed'
+        self.assertFalse(rebuild._legacy_plan_compatible(prior,changed))
+        changed=copy.deepcopy(current);changed['code']['DINOv3/relation_reliability/superadd_host.py']='changed'
+        self.assertFalse(rebuild._legacy_plan_compatible(prior,changed))
+        unknown=copy.deepcopy(prior);unknown['code']['DINOv3/relation_reliability/superadd_host.py']='unknown'
+        self.assertFalse(rebuild._legacy_plan_compatible(unknown,current))
+        read=Path.read_text
+        def changed_builder(path,*a,**kw):
+            text=read(path,*a,**kw)
+            return text.replace('model.max_database_size != ENTRIES','model.max_database_size != 99999') if path.name=='rebuild.py' else text
+        with mock.patch.object(Path,'read_text',changed_builder):
+            self.assertFalse(rebuild._legacy_plan_compatible(prior,current))
+
     def test_plan_rejects_pre_excluded_or_reordered_training(self):
         ctx=self.context();ctx['cat']['train']=ctx['cat']['train'][1:]
         with self.assertRaisesRegex(ValueError,'split'):rebuild.plan(ctx)
         ctx=self.context();ctx['cat']['train'][1:3]=ctx['cat']['train'][2:0:-1]
         with self.assertRaisesRegex(ValueError,'split'):rebuild.plan(ctx)
+
+    def test_legacy_generation_ast_handles_empty_python312_type_params_only(self):
+        import ast
+        current=rebuild.plan(self.context());prior=self.legacy_plan(current)
+        parse=ast.parse
+        def schema(source,*a,nonempty=False,**kwargs):
+            tree=parse(source,*a,**kwargs)
+            for node in ast.walk(tree):
+                if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef)):
+                    if 'type_params' not in node._fields:node._fields=(*node._fields,'type_params')
+                    node.type_params=[ast.Constant(value='semantic change')] if nonempty else []
+            return tree
+        with mock.patch.object(ast,'parse',side_effect=schema):
+            self.assertTrue(rebuild._legacy_plan_compatible(prior,current))
+        with mock.patch.object(ast,'parse',side_effect=lambda *a,**k:schema(*a,nonempty=True,**k)):
+            self.assertFalse(rebuild._legacy_plan_compatible(prior,current))
 
     def test_reconstruction_must_not_overlap_original_or_prediction_tree(self):
         ctx=self.context()
@@ -155,6 +198,25 @@ class Reconstruction(unittest.TestCase):
         path=rebuild.directory(ctx['paths'],'MetalParts')/'memory/official_banks.npz'
         path.write_bytes(path.read_bytes()+b'modified')
         with self.assertRaisesRegex(ValueError,'changed'):rebuild.run(ctx,'cuda:0')
+
+    def test_legacy_bank_manifest_reused_readonly_with_new_observation_identity(self):
+        ctx=self.context();value=self.mock_build(ctx);validate=rebuild.validate_arrays
+        with (mock.patch.object(rebuild,'ordered_records',return_value=list(range(180))),
+              mock.patch.object(rebuild,'original_build',return_value=value),
+              mock.patch.object(ip,'available_ram',return_value=120<<30),
+              mock.patch.object(rebuild.shutil,'disk_usage',return_value=type('Disk',(),{'free':100<<30})()),
+              mock.patch.object(rebuild,'validate_arrays',side_effect=lambda a,b,c:validate(a,b,c,entries=3,dimension=2))):
+            manifest=rebuild.run(ctx,'cuda:0')
+        path=rebuild.directory(ctx['paths'],'MetalParts')/'rebuild_status.json'
+        manifest['plan']=self.legacy_plan(manifest['plan']);manifest['plan_identity']=ip.digest(manifest['plan'])
+        ip.write_json(path,manifest);before=ip.sha(path)
+        with mock.patch.object(rebuild,'original_build',side_effect=AssertionError('bank rebuilt')):
+            self.assertEqual(rebuild.run(ctx,'cuda:0'),manifest)
+        snapshot=rebuild.snapshot(ctx['paths'],'MetalParts',rebuild.plan(ctx))
+        self.assertEqual(snapshot['generation_compatibility'],'96d4981_unchanged_bank_generation')
+        self.assertEqual(before,ip.sha(path))
+        bank=path.parent/'memory/official_banks.npz';bank.write_bytes(bank.read_bytes()+b'changed')
+        with self.assertRaisesRegex(ValueError,'changed'):rebuild.verify(ctx['paths'],'MetalParts',rebuild.plan(ctx))
 
     def test_partial_or_failed_rebuild_preserved_not_approved_on_retry(self):
         ctx=self.context();self.mock_build(ctx)
@@ -286,6 +348,32 @@ class Cases(unittest.TestCase):
         self.assertEqual(ip.read_json(a['root']/'calibration_status.json')['source_forward_calls'],0)
         self.assertFalse(ip.read_json(a['root']/'calibration_status.json')['patch_MAD_refitted'])
         self.assertEqual(sa,cal.recover(a,'cuda:0'))
+
+    def test_source_calibration_preserves_original_descriptor_and_crop_batch_path(self):
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        ctx,_=self.fixture()
+        observation=SimpleNamespace(raw_distances=np.ones((4,3,4),np.float32),
+            top1_indices=np.zeros((4,3,4),np.int64),grid=(3,4))
+        observe=mock.Mock(return_value=observation)
+        host=SimpleNamespace(observe_pil=observe,preprocessed_spatial_shape=lambda *a:(48,64))
+        fake={
+            'DINOv3.relation_reliability.superadd_host':host,
+            'DINOv3.MADEqual.image_granularity_calibration.scoring':SimpleNamespace(interpolated_layer_maxima=lambda *a:(None,np.zeros(4,np.float32))),
+            'DINOv3.MADEqual.connected_region.scoring':SimpleNamespace(local_mean=lambda a:float(a.mean())),
+            'DINOv3.relation_oracle_cache.extract':SimpleNamespace(mad_calibrated=lambda a,*x:a),
+        }
+        with (mock.patch.dict(sys.modules,fake),
+              mock.patch('DINOv3.relation_reliability.superadd_host',host,create=True),
+              mock.patch.object(rt,'profile_original',return_value=nullcontext())):
+            _,meta=rt.source_observation(ctx,ctx['cat']['calibration'][0],object(),'cuda:fixture')
+            self.assertIs(observe.call_args.kwargs['include_identity_descriptors'],True)
+            self.assertEqual(meta['crop_batch_policy'],'original_identity_descriptors_2')
+            self.assertEqual(meta['forward_image_batch'],1)
+            a,meta=rt.source_observation(ctx,ctx['cat']['source_evaluation'][0],object(),'cuda:fixture')
+            self.assertIs(observe.call_args.kwargs['include_identity_descriptors'],False)
+            self.assertNotIn('original_peak',a)
+            self.assertEqual(meta['crop_batch_policy'],'original_feature_only_all_crops')
 
     def test_calibration_wrong_category_or_changed_state_rejected(self):
         ctx,_=self.fixture();cal.recover(ctx,'cuda:0');path=ctx['root']/'image_calibration_state.json'

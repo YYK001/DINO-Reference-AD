@@ -99,6 +99,16 @@ bash "$entry" rebuild-source
 
 依赖预检将 `timm/omegaconf` 列为可选信息：当前industrial宿主、ViT backbone及原构库模块的CPU导入不需要它们。完整官方hub还会导入 `torchmetrics`，列为必需。版本检查不能代替服务器实际导入/模型初始化；不自动安装包。
 
+### 2026-10-18 Source校准调用修正与已有bank复用
+
+原 `relation_reliability.runner._fit_reliability` 调用 `observe_pil(..., include_identity_descriptors=True)`；初版接入漏传该参数，走了默认False。两者不仅有无描述符侧输出不同：`memory_variants.patched_features_and_relations` 的crop batch分别为2和全部窗口。每图batch=1不能证明切窗batch相同。当前Source校准恢复明确传True，Source测试沿用原False；Target提取不改。meta记录描述符开关、图像batch与crop batch策略。不放宽MAD统计或CURRENT容差，也不改旧patch MAD。
+
+用户提供的首次运行记录：MetalParts/PCB构库分别232.654s/390.477s，八组100K索引与旧sidecar逐顺序相等；MetalParts的23张校准在L23/L31历史MAD统计核验失败，同次CPU统计核验通过。这定位出一处确定的调用路径不一致，但修正是否解释全部差异仍须服务器重算验证，不能把索引相等写成旧bank字节相同。
+
+本次修复可复用`96d4981`产生的完整bank：验证已知生产代码指纹、所有非代码计划输入、其余依赖SHA，以及**除观测/验证入口外的完整构库模块AST与宿主加载模块AST**均未改变；bank及索引文件仍按原历史SHA检查。未知生产者、改种子/预算/图片/权重/构库代码均拒绝。原重建清单不改写，新输出记录`generation_compatibility=96d4981_unchanged_bank_generation`。
+
+**必须换新的OUTPUT_ROOT**，REBUILT_SOURCE_ROOT继续指向已完成重建的目录。旧23张校准走错路径，不能导入新输出；重新计算校准即可。旧失败输出保留，不能改其inputs/账本或重置哈希使其通过。`all`会验证并复用bank，然后校准、正式捕获和评价；仅全流程成功才自动关机。
+
 已发现本地旧归档 `server_results/relation_oracle_seed42_cache_and_audit/mvtec_robustad_seed42_v2`，实际为递归 `images/<domain>__<shift>/*.npz` 布局；包含两类完整 Source 测试缓存及 Target 的 Source-only 距离，不含训练校准的 23 张。预检只报告候选，显式指定 SOURCE_RAW_ROOT 后才进行原 bank-dependent 身份验证/复用。AutoDL 是否保留该旧归档尚未确认。有历史 Target Source raw 时另存严格距离比较审计；跨环境验收仍按冻结 CURRENT 分数兼容规则，同次回调距离核验不改变。
 
 ## AutoDL 手动命令

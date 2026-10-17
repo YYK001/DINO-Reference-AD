@@ -99,13 +99,51 @@ def validate_arrays(banks, indices, candidate_rows, *, entries=ENTRIES, dimensio
             raise ValueError('invalid selected original candidate indices')
 
 
+def _legacy_plan_compatible(prior, current):
+    """Narrow 96d4981 bank reuse after fixing calibration ONLY, never raw reuse.
+
+    Older plans hashed the entire tool, including unrelated observation code.
+    Require the known producer, identical non-code inputs and all other code,
+    and unchanged generation ASTs. Do not rewrite the producer's manifest.
+    """
+    import ast
+    import hashlib
+    if prior == current:
+        return True
+    if ({k:v for k,v in prior.items() if k!='code'}
+            != {k:v for k,v in current.items() if k!='code'}):
+        return False
+    old=prior.get('code',{}); new=current.get('code',{})
+    if ip.digest(old)!='48fc11a1af3db200900249338945457e9fe9ebff9f4b12d2976643c3005346a1':
+        return False
+    prefix='DINOv3/MADEqual/robustad_segment_pair_crossdataset_p0/'
+    changed={prefix+'runtime.py',prefix+'rebuild.py'}
+    if set(old)!=set(new) or any(old[k]!=new[k] for k in old if k not in changed):
+        return False
+    contracts=(('runtime.py',{'source_observation'},
+                '9b2aff23503c53138aebe6a167c7983cc824cf3b5f1ff9e2ec6ab815cf7b3364'),
+               ('rebuild.py',{'verify','snapshot','_legacy_plan_compatible'},
+                'c1de8ed14f5d42e44f42789e86d33bc185f7112bd77434eb93143fcf39f401a0'))
+    for filename,skip,expected in contracts:
+        tree=ast.parse(Path(__file__).with_name(filename).read_text(encoding='utf-8-sig'))
+        tree.body=[n for n in tree.body if not isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) or n.name not in skip]
+        # Python3.12 adds empty type_params fields absent from Python3.11.
+        # Remove only that empty schema addition, never nonempty declarations.
+        for node in ast.walk(tree):
+            if getattr(node,'type_params',None)==[]:
+                node._fields=tuple(k for k in node._fields if k!='type_params')
+        if hashlib.sha256(ast.dump(tree,include_attributes=False).encode()).hexdigest()!=expected:
+            return False
+    return True
+
+
 def verify(paths, category, expected_plan=None):
     root = directory(paths, category); manifest = ip.read_json(root / 'rebuild_status.json')
     if (manifest.get('status') != 'bank_reconstructed'
             or manifest.get('format') != FORMAT or manifest.get('category') != category
             or manifest.get('bank_origin') != 'explicit_reconstruction_original_builder'
             or ip.digest(manifest['plan']) != manifest.get('plan_identity')
-            or (expected_plan is not None and manifest['plan'] != expected_plan)):
+            or (expected_plan is not None and not _legacy_plan_compatible(manifest['plan'],expected_plan))):
         raise ValueError('reconstruction identity incomplete or changed; use a new reconstruction root')
     if manifest['files'].keys() != {'memory/official_banks.npz', 'memory/selected_candidate_indices.npz'}:
         raise ValueError('incomplete reconstruction file registry')
@@ -119,9 +157,10 @@ def snapshot(paths, category, expected_plan=None):
     root = directory(paths, category)
     if not root.exists():
         return dict(bank_origin='explicit_reconstruction_pending', rebuild_manifest_sha256=None)
-    verify(paths, category, expected_plan)
+    manifest=verify(paths, category, expected_plan)
     return dict(bank_origin='explicit_reconstruction_original_builder',
-                rebuild_manifest_sha256=ip.sha(root / 'rebuild_status.json'))
+                rebuild_manifest_sha256=ip.sha(root / 'rebuild_status.json'),
+                generation_compatibility='96d4981_unchanged_bank_generation' if expected_plan is not None and manifest['plan']!=expected_plan else 'exact_plan')
 
 
 def ordered_records(ctx):
