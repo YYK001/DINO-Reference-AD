@@ -1,6 +1,6 @@
 # 上传范围
 
-第二章代码及必要依赖：442 个文件，6.954 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
+第二章代码及必要依赖：456 个文件，7.164 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
 
 不包含数据集、图片、权重、正式 memory/MAD、缓存、结果包、实验报告或本机盘点。
 少量非 AeBAD 目录文件为实际导入依赖；未整体纳入其独立实验。
@@ -46,6 +46,19 @@ DINOv3/MADEqual/aebad_s_full_p0/dataset.py
 DINOv3/MADEqual/aebad_s_full_p0/runner.py
 DINOv3/MADEqual/aebad_s_full_p0/scripts/run_aebad_s_full_seed42.sh
 DINOv3/MADEqual/aebad_s_full_p0/tests/test_aebad_s_full_p0.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/README.md
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/__init__.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/background_identity.json
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/capture.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/inputs.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/prediction.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/reporting.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/runner.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/scheduler.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/selection.py
+DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/storage.py
 DINOv3/MADEqual/aebad_s_neighborhood_segment_p0/README.md
 DINOv3/MADEqual/aebad_s_neighborhood_segment_p0/__init__.py
 DINOv3/MADEqual/aebad_s_neighborhood_segment_p0/analysis.py
@@ -193,6 +206,7 @@ DINOv3/relation_reliability/requirements-lock.txt
 DINOv3/relation_reliability/scoring.py
 DINOv3/relation_reliability/superadd_host.py
 DINOv3/tests/test_aebad_s_broad6_compose2.py
+DINOv3/tests/test_aebad_s_k8_support_sensitivity.py
 DINOv3/tests/test_aebad_s_mmr_compatible_eval.py
 DINOv3/tests/test_aebad_s_neighborhood_segment_p0.py
 DINOv3/tests/test_aebad_s_phys4_compose2.py

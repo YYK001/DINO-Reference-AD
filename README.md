@@ -39,6 +39,12 @@ Kaggle 更新代码后，官方源码路径为 `/kaggle/working/DINO-Reference-A
 
 本轮仅完成本地实现、CPU专项与相关回归检查；真实AutoDL模型/CUDA/指标尚未执行。完整运行示例可启用成功后关机，仅全部指标、ARD和review包成功后关机，任何失败保留现场。
 
+## AeBAD-S 固定 K8 支持集敏感性
+
+新增独立工具：[运行与续跑说明](DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/README.md)、[实现审计](DINOv3/MADEqual/aebad_s_k8_support_sensitivity_p0/implementation_audit.md)。固定 background / illumination / view 三域、支持 seed42/43/44，比较 UNION / SEGMENT / PAIR 共27个组合。所有支持组在每域使用同一共同评价子集，共878张；Source memory 和校准保持冻结。
+
+提供 preflight / prepare / capture / predict / evaluate / evaluate-aupro / summarize。默认预检只读、不导入Torch；共享查询提取和Source检索，支持逐图及评价组合续跑。新增29项本地CPU专项通过，真实模型、CUDA及本次27组合正式实验尚未执行。本机资产盘点和所有实验产物不上传。
+
 ## 代码同步
 
 在服务器建立独立代码目录，由用户执行：
