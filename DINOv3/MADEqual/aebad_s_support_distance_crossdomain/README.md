@@ -189,3 +189,17 @@ RUN = main(PROJECT)
 ```
 
 正式执行时建议在clone后再checkout本次发布commit，以冻结源码。运行顺序、12GiB CPU预算、14GiB模型准入、原精度、心跳、失败保留和两个自动结果包均保持上述定义。没有本地或服务器实际启动行为。
+
+### 双T4版本
+
+用户尚未启动旧Cell，并明确要求利用两张卡。当前GitHub入口默认`capture_gpus=2`，也可显式写`main(PROJECT, capture_gpus=2)`；只在手动选择`capture_gpus=1`时使用单卡。之前内嵌Notebook和旧commit是单卡快照，不会被静默改写，应使用本次新发布commit。
+
+只改变capture的执行调度：图数更多的view（364张）先启动；首张capture登记后，再启动illumination（265张）。两进程通过CUDA_VISIBLE_DEVICES各自只看见一张卡，因此各自日志中的cuda:0分别对应外部GPU0和GPU1。每张图完整提取一次，原batch、float32、切窗、Source/Target NN、距离/1280、支持顺序及SEGMENT几何均保持不变。没有拆模型、拆batch或合并两卡显存。
+
+两路各写capture_shards/domain，退出后用原cache_state/schema和数值记录校验，按原catalog顺序合并。raw使用同文件系统硬链接，保留原字节及SHA，不额外复制一份大缓存；原分路目录和历史记录保留。完整几何raw的合并不依赖支持特征实体。任何缺图、身份/哈希不匹配、失败数值记录均不能被合并为capture_complete。预测、CPU评价、AUPRO及诊断仍复用原入口，不在30GiB RAM下同时启动两套全像素排序。
+
+资源检查：两卡各需14GiB空闲显存；环境探测时需24GiB有效可用RAM；读完预检输入后需20GiB；第二套宿主启动前需14GiB。运行期间每秒采样RAM，低于2GiB余量时停止两路并保留缓存。上述是保守准入/中止值，不是实测峰值或绝对无OOM保证；旧capture内的12GiB原守卫也保留。没有自动改回单卡、减batch或改精度。
+
+失败会取消另一进程、等其退出后再打包，分路中已完成的raw也会被保留并尝试归档。parallel_capture_plan.json及两路capture日志/退出码记录设备、启动顺序和资源观测；合并状态保留各自原清单SHA。成功包只归档一套合并raw，不重复打包硬链接的另一份路径。
+
+双卡调度新增12项纯CPU测试，实际运行双子进程验证重叠、错开启动和同伴失败中止，并用完整schema小NPZ验证原哈希、物理位置、原支持顺序、合并、缺失/失败拒绝和硬链接；合并产物继续执行原三分支预测和评分。CUDA设备及两套宿主真实RAM/显存峰值尚未验证。按旧单T4耗时和364/265的分配，整轮暂估4.5–6小时；这是估计，非双卡实测或严格二倍加速承诺。

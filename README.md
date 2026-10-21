@@ -53,6 +53,8 @@ Kaggle 更新代码后，官方源码路径为 `/kaggle/working/DINO-Reference-A
 
 该工具的 `background_discovery_catalog.json` 是汇总需要的小型冻结参照，只含预设主描述量和覆盖/实例分组统计及原文件SHA，不含完整background结果、报告、图片或距离缓存。统计内核版本与catalog SHA严格核验，不把其内容当作新域验证结果。其余已完成产物、数据和模型仍不随代码上传。
 
+当前Kaggle入口默认双T4按域补缓存：view先用GPU0，首图登记后illumination用GPU1；子进程设备隔离、独立缓存和原SHA合并，不拆原提取batch或改精度。可显式`main(PROJECT, capture_gpus=2)`；真实双GPU峰值与耗时尚待验证，资源不足明确停止，不自动降级。
+
 在服务器建立独立代码目录，由用户执行：
 
 ```bash

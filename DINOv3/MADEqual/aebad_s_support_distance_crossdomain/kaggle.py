@@ -31,7 +31,12 @@ def write(path,data):
     path.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')
 
 
-def command(label,cmd,project,run,env):
+def capture_progress(run):
+    roots=[run/'cache',*[run/'capture_shards'/d for d in ('illumination','view')]]
+    return len({(p.parent.name,p.name) for root in roots for p in (root/'raw_cache').glob('*/*.npz')})
+
+
+def command(label,cmd,project,run,env,*,cancel_event=None):
     """Flush subprocess output and independent 30-second progress heartbeats."""
     say('STAGE='+label+' START');started=time.monotonic();last=started
     with (run/(label+'.log')).open('x',encoding='utf-8') as log:
@@ -45,6 +50,7 @@ def command(label,cmd,project,run,env):
         thread=threading.Thread(target=read,daemon=True);thread.start();done=False
         try:
             while not done:
+                if cancel_event is not None and cancel_event.is_set():raise RuntimeError(label+' cancelled after peer failure')
                 try:
                     line=lines.get(timeout=1)
                     if line is None:done=True
@@ -52,7 +58,7 @@ def command(label,cmd,project,run,env):
                 except queue.Empty:pass
                 now=time.monotonic()
                 if now-last>=30:
-                    n=sum(1 for _ in (run/'cache/raw_cache').glob('*/*.npz'))
+                    n=capture_progress(run)
                     say(f'[heartbeat] stage={label} elapsed={now-started:.0f}s capture_files={n}/629')
                     last=now
             rc=p.wait();(run/(label+'.exitcode')).write_text(str(rc)+'\n')
@@ -62,6 +68,7 @@ def command(label,cmd,project,run,env):
                 try:p.wait(timeout=30)
                 except subprocess.TimeoutExpired:p.kill();p.wait()
             thread.join();p.stdout.close()
+            (run/(label+'.exitcode')).write_text(str(p.returncode)+'\n')
     say(f'STAGE={label} EXIT_CODE={rc} SECONDS={time.monotonic()-started:.1f}')
     if rc:raise RuntimeError(f'{label} failed: exit_code={rc}; see {run/(label+".log")}')
 
@@ -91,10 +98,14 @@ def pack(run,state):
         if p.suffix=='.tmp' or '_scratch' in '/'.join(parts):return False
         if parts[0]=='cache':return len(parts)>1 and (parts[1]=='raw_cache' or len(parts)==2)
         if parts[0]=='prediction':return p.suffix!='.npz'
+        if parts[0]=='capture_shards':
+            if p.suffix in ('.json','.csv'):return True
+            # On failure before merge, retain every completed shard raw too.
+            return len(parts)>3 and parts[2]=='raw_cache' and p.suffix=='.npz' and not (run/'cache'/Path(*parts[2:])).is_file()
         return parts[0] in ('cpu','aupro','diagnostic','frozen_inputs','background_reference') or len(parts)==1
     raw=[p for p in files if portable(p)]
     state['raw_archive']=None;state['raw_archive_error']=None
-    if any(p.relative_to(run).parts[:2]==('cache','raw_cache') for p in raw):
+    if any('raw_cache' in p.relative_to(run).parts for p in raw):
         archive=run.parent/(run.name+'_RAW_AND_REFERENCES.tar')
         needed=sum(p.stat().st_size for p in raw)+len(raw)*2048+(128<<20)
         if shutil.disk_usage(run).free<needed:
@@ -123,9 +134,10 @@ def pack(run,state):
     return summary
 
 
-def main(project,overlay_bytes=None,overlay_sha256=None,run_root=None,input_root=Path('/kaggle/input')):
+def main(project,overlay_bytes=None,overlay_sha256=None,run_root=None,input_root=Path('/kaggle/input'),*,capture_gpus=2):
     project=Path(project).resolve()
     if not project.is_relative_to(Path('/kaggle/working')):raise ValueError('this orchestrator is for explicit Kaggle execution only')
+    if capture_gpus not in (1,2):raise ValueError('capture_gpus must explicitly be 1 or 2')
     stamp=datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d_%H%M%S')
     run=Path(run_root or '/kaggle/working')/('aebad_full_crossdomain_'+stamp+'_'+uuid.uuid4().hex[:6]);run.mkdir(parents=True)
     if overlay_bytes is not None:
@@ -174,7 +186,9 @@ def main(project,overlay_bytes=None,overlay_sha256=None,run_root=None,input_root
         config=dict(commit=commit,paths=dict(project_root=str(project),formal_dir=str(frozen/'formal'),
             image_state=str(frozen/'image_calibration_state.json'),data=str(found['data']),memory=str(found['memory']),
             checkpoint=str(found['checkpoint']),dinov3=str(project/'external_baselines/dinov3'),cache_root=str(run/'cache')),
-            device='cuda:0',cpu_workers=4,model_parallelism='one original host; GPUs not pooled',
+            device='cuda:0',cpu_workers=4,capture_gpus=capture_gpus,
+            model_parallelism='two domain hosts; staggered loading; no pooled VRAM' if capture_gpus==2 else 'one original host',
+            capture_devices={'view':'cuda:0','illumination':'cuda:1'} if capture_gpus==2 else {'both':'cuda:0'},
             memory_budget_gib=12,capture_min_free_vram_gib=14)
         write(run/'run_config.json',config)
         environment='''
@@ -196,8 +210,11 @@ from DINOv3.relation_reliability.official_metrics import validate_official_metri
 validate_official_metric_backend()
 from DINOv3.MADEqual.aebad_s_neighborhood_segment_p0.inputs import available_ram
 print('AVAILABLE_RAM_GiB:',available_ram()/2**30,'DISK_FREE_GiB:',shutil.disk_usage('/kaggle/working').free/2**30,flush=True)
-assert available_ram()>=12*2**30,'need 12 GiB available RAM'
-assert torch.cuda.mem_get_info(0)[0]>=14*2**30,'need 14 GiB free GPU0; restart stale session'
+'''
+        environment+=f'''\nassert torch.cuda.device_count()>={capture_gpus}, 'requested GPU count unavailable; no silent fallback'
+assert available_ram()>={24 if capture_gpus==2 else 12}*2**30, 'insufficient initial RAM for requested capture scheduling'
+for device_index in range({capture_gpus}):
+ assert torch.cuda.mem_get_info(device_index)[0]>=14*2**30, 'each requested GPU needs 14 GiB free VRAM'
 print('ENVIRONMENT_OK; no model constructed',flush=True)
 '''
         label='environment';command(label,[sys.executable,'-B','-u','-c',environment],project,run,env)
@@ -209,7 +226,17 @@ print('ENVIRONMENT_OK; no model constructed',flush=True)
             command(name,[sys.executable,'-B','-u','-m',OLD,name,*common,*args],project,run,env)
             state['stages'].append(name);write(run/'pipeline_status.json',state)
         label='preflight';stage(label,'--no-write')
-        label='capture';stage(label)
+        label='capture'
+        if capture_gpus==1:stage(label)
+        else:
+            from . import parallel_capture
+            parallel_capture.run(parallel_capture.commands(common,run),project,run,env,command)
+            state['stages'].append('capture');label='merge-capture'
+            paths={k:Path(v) for k,v in config['paths'].items() if k!='project_root'}
+            paths.update(project=project,official=project/'external_baselines/SuperADD')
+            ctx=ip.old.context(paths,verify_data=False)
+            parallel_capture.merge(ctx,{d:run/'capture_shards'/d for d in ('illumination','view')},run/'cache')
+            state['stages'].append(label);write(run/'pipeline_status.json',state)
         if ip.old.read_json(run/'cache/cache_status.json')['status']!='capture_complete':raise ValueError('capture not complete')
         label='predict';stage(label,'--output-dir',str(run/'prediction'))
         label='evaluate';stage(label,'--prediction-dir',str(run/'prediction'),'--output-dir',str(run/'cpu'),'--memory-budget-gib','12')
