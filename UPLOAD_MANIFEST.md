@@ -1,6 +1,6 @@
 # 上传范围
 
-第二章代码及必要依赖：480 个文件，7.486 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
+第二章代码及必要依赖：482 个文件，7.505 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
 
 不包含数据集、图片、权重、正式 memory/MAD、缓存、结果包、实验报告或本机盘点。
 少量非 AeBAD 目录文件为实际导入依赖；未整体纳入其独立实验。
@@ -117,12 +117,14 @@ DINOv3/MADEqual/aebad_s_support_distance_crossdomain/README.md
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/__init__.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/analysis.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/background_discovery_catalog.json
+DINOv3/MADEqual/aebad_s_support_distance_crossdomain/capture_worker.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/discovery.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/inputs.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/kaggle.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/live_parent.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/parallel_capture.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/reporting.py
+DINOv3/MADEqual/aebad_s_support_distance_crossdomain/resources.py
 DINOv3/MADEqual/aebad_s_support_distance_crossdomain/runner.py
 DINOv3/MADEqual/aebad_s_support_distance_diagnostic/README.md
 DINOv3/MADEqual/aebad_s_support_distance_diagnostic/__init__.py

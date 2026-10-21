@@ -7,12 +7,19 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 import numpy as np
 from DINOv3.MADEqual.aebad_s_support_distance_crossdomain import inputs as ip,kaggle,parallel_capture as pc
+from DINOv3.MADEqual.aebad_s_support_distance_crossdomain import resources,capture_worker
 from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0 import runner as original_runner
 from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0 import method,prediction
 from DINOv3.tests.test_aebad_s_support_distance_crossdomain import fixture
+
+
+def memory(gib):
+    return dict(effective_available_bytes=int(gib*2**30),strict_available_bytes=int(gib*2**30),
+                inactive_file_reclaim_credit_bytes=0)
 
 
 def shards_fixture(root):
@@ -145,29 +152,56 @@ class DomainScheduler(unittest.TestCase):
         self.assertNotIn('OMP_NUM_THREADS',envs['view'])
         with self.assertRaises(ValueError):pc.device_environments({'CUDA_VISIBLE_DEVICES':'0'})
     def test_actual_two_cpu_subprocesses_overlap_after_stagger(self):
-        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(ip.base,'available_ram',return_value=64*2**30):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',return_value=memory(64)):
             root=Path(f);pc.run(cpu_commands(root),ip.ROOT,root,None,kaggle.command)
             self.assertLess(float((root/'illumination_started').read_text()),float((root/'view_finished').read_text()))
             self.assertEqual(ip.old.read_json(root/'parallel_capture_plan.json')['status'],'both_capture_processes_succeeded')
     def test_peer_failure_terminates_other_process_and_preserves_raw(self):
-        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(ip.base,'available_ram',return_value=64*2**30):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',return_value=memory(64)):
             root=Path(f)
             with self.assertRaisesRegex(RuntimeError,'exit_code=4'):pc.run(cpu_commands(root,True),ip.ROOT,root,None,kaggle.command)
             self.assertNotEqual((root/'capture_view.exitcode').read_text().strip(),'0')
             self.assertFalse((root/'view_finished').exists())
             self.assertTrue((root/'capture_shards/view/raw_cache/view/test_first.npz').is_file())
     def test_insufficient_ram_refuses_before_model_start(self):
-        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(ip.base,'available_ram',return_value=pc.INITIAL_RAM-1):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',return_value=memory(19)):
             execute=mock.Mock()
             with self.assertRaisesRegex(MemoryError,'20 GiB'):pc.run({'view':[],'illumination':[]},ip.ROOT,Path(f),None,execute)
             execute.assert_not_called()
-    def test_running_ram_floor_cancels_peers_without_model_downgrade(self):
-        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(ip.base,'available_ram',side_effect=[64*2**30,64*2**30,1*2**30]):
+    def test_single_active_host_pressure_fails_without_method_downgrade(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',side_effect=[memory(64),memory(8),memory(1)]):
             root=Path(f);commands=cpu_commands(root)
             commands['view'][3]=commands['view'][3].replace('time.sleep(.8)','time.sleep(5)')
             commands['illumination'][3]+='\ntime.sleep(5)'
-            with self.assertRaisesRegex(MemoryError,'below 2 GiB'):pc.run(commands,ip.ROOT,root,None,kaggle.command)
+            with self.assertRaisesRegex(MemoryError,'less than 2 GiB'):pc.run(commands,ip.ROOT,root,None,kaggle.command)
             self.assertFalse((root/'view_finished').exists())
+    def test_low_second_host_ram_finishes_first_instead_of_aborting(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',side_effect=lambda: memory(8 if (Path(f)/'capture_shards/view/cache_status.json').exists() and not (Path(f)/'view_finished').exists() else 64)):
+            root=Path(f);pc.run(cpu_commands(root),ip.ROOT,root,None,kaggle.command)
+            self.assertGreater(float((root/'illumination_started').read_text()),float((root/'view_finished').read_text()))
+            self.assertEqual(ip.old.read_json(root/'parallel_capture_plan.json')['execution_mode'],'serial_insufficient_second_host_RAM')
+    def test_parallel_pressure_pauses_then_resumes_second_after_first_exits(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
+            root=Path(f);commands=cpu_commands(root)
+            commands['view'][3]=commands['view'][3].replace('time.sleep(.8)','time.sleep(2)')
+            commands['illumination'][3]+="""
+import os
+p=Path(os.environ['DINO_CAPTURE_PAUSE_FILE'])
+if not (root/'paused_once').exists():
+ while not p.exists():time.sleep(.01)
+ (root/'paused_once').write_text('1')
+ raise SystemExit(75)
+assert (root/'view_finished').exists()
+"""
+            calls=[memory(64),memory(64)]
+            def snapshot():
+                if calls:return calls.pop(0)
+                return memory(1 if not (root/'paused_once').exists() else 64)
+            with mock.patch.object(resources,'memory_snapshot',side_effect=snapshot):pc.run(commands,ip.ROOT,root,None,kaggle.command)
+            self.assertEqual((root/'capture_illumination.exitcode').read_text().strip(),'75')
+            self.assertEqual((root/'capture_illumination_serial_resume.exitcode').read_text().strip(),'0')
+            self.assertGreater(float((root/'illumination_started').read_text()),float((root/'view_finished').read_text()))
+            self.assertEqual(ip.old.read_json(root/'parallel_capture_plan.json')['execution_mode'],'parallel_then_serial_RAM_pressure')
     def test_progress_and_failed_pack_include_shards_without_double_count(self):
         with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
             root=Path(f)/'run';root.mkdir();p=root/'capture_shards/view/raw_cache/view/test_same.npz'
@@ -177,6 +211,97 @@ class DomainScheduler(unittest.TestCase):
             with tarfile.open(state['raw_archive']) as t:self.assertIn('run/capture_shards/view/raw_cache/view/test_same.npz',t.getnames())
             dest=root/'cache/raw_cache/view/test_same.npz';dest.parent.mkdir(parents=True);os.link(p,dest)
             self.assertEqual(kaggle.capture_progress(root),1)
+
+
+class WorkingSetAccounting(unittest.TestCase):
+    def snapshot(self,current=22,inactive=6,files=7,anon=14,limit=30,system=900):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
+            root=Path(f)
+            (root/'memory.max').write_text(str(int(limit*2**30)))
+            (root/'memory.current').write_text(str(int(current*2**30)))
+            (root/'memory.stat').write_text(f'anon {int(anon*2**30)}\nfile {int(files*2**30)}\ninactive_file {int(inactive*2**30)}\nslab_reclaimable {2**30}\n')
+            return resources.memory_snapshot(root,int(system*2**30))
+    def test_only_inactive_file_cache_receives_credit(self):
+        s=self.snapshot()
+        self.assertEqual(s['strict_available_bytes'],8*2**30)
+        self.assertEqual(s['effective_available_bytes'],14*2**30)
+        self.assertEqual(s['inactive_file_reclaim_credit_bytes'],6*2**30)
+    def test_system_and_container_bounds_and_over_limit(self):
+        self.assertEqual(self.snapshot(system=9)['effective_available_bytes'],9*2**30)
+        self.assertEqual(self.snapshot(inactive=99,files=99)['effective_available_bytes'],30*2**30)
+        self.assertEqual(self.snapshot(current=32,inactive=1)['effective_available_bytes'],0)
+    def test_missing_stats_uses_strict_limit_not_host_memory(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
+            root=Path(f);(root/'memory.max').write_text(str(30*2**30));(root/'memory.current').write_text(str(22*2**30))
+            self.assertEqual(resources.memory_snapshot(root,900*2**30)['effective_available_bytes'],8*2**30)
+    def test_unlimited_or_missing_cgroup_does_not_fabricate_credit(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
+            root=Path(f)
+            self.assertEqual(resources.memory_snapshot(root,7*2**30)['effective_available_bytes'],7*2**30)
+            (root/'memory.max').write_text('max')
+            self.assertEqual(resources.memory_snapshot(root,7*2**30)['effective_available_bytes'],7*2**30)
+
+
+class WorkerCheckpoints(unittest.TestCase):
+    def test_second_host_import_overhead_defers_before_host_allocation(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
+            stop=Path(f)/'pause.request'
+            def invoke(argv):
+                ip.old.common.available_ram();self.fail('must not reach model loading')
+            with mock.patch.dict(os.environ,{'DINO_CAPTURE_PAUSE_FILE':str(stop)}),mock.patch.object(resources,'memory_snapshot',return_value=memory(11)):
+                self.assertEqual(capture_worker.run([],invoke),75)
+            self.assertTrue(stop.exists())
+    def test_pause_preserves_environment_when_last_image_needs_cache_only_resume(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
+            root=Path(f);ctx,shards=shards_fixture(root);shard=shards['view'];stop=root/'pause.request';stop.touch()
+            (shard/'capture_environment.json').unlink()
+            # Metadata-only stand-in: exercises no real CUDA operation.
+            cuda=SimpleNamespace(is_initialized=lambda:True,get_device_name=lambda:'synthetic GPU metadata',
+                max_memory_allocated=lambda:123,max_memory_reserved=lambda:456)
+            fake=SimpleNamespace(__version__='synthetic',version=SimpleNamespace(cuda=None),cuda=cuda)
+            csv=shard/'capture_verification.csv';rows=ip.old.csv_file(csv)
+            with mock.patch.dict(os.environ,{'DINO_CAPTURE_PAUSE_FILE':str(stop)}),mock.patch.dict(sys.modules,{'torch':fake}):
+                self.assertEqual(capture_worker.run([],lambda argv:ip.old.write_csv(csv,rows)),75)
+            env=ip.old.read_json(shard/'capture_environment.json')
+            self.assertEqual(env['precision'],ip.old.PRECISION)
+            self.assertEqual(env['peak_cuda_allocated_bytes'],123)
+            self.assertIn('actual_worker_at_verified_RAM_pause',env['environment_scope'])
+    def test_pause_waits_for_complete_verification_and_resumes_with_old_hashes(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
+            root=Path(f);ctx,shards=shards_fixture(root);shard=shards['view'];stop=root/'pause.request';stop.touch()
+            csv=shard/'capture_verification.csv';rows=ip.old.csv_file(csv);snapshot=(shard/'cache_status.json').read_bytes()
+            calls=[]
+            def invoke(argv):
+                ip.old.write_csv(csv,rows[:1]);calls.append('incomplete_commit_not_paused')
+                ip.old.write_csv(csv,rows);self.fail('complete commit should pause')
+            with mock.patch.dict(os.environ,{'DINO_CAPTURE_PAUSE_FILE':str(stop)}):
+                self.assertEqual(capture_worker.run([],invoke),75)
+            self.assertEqual(calls,['incomplete_commit_not_paused'])
+            self.assertEqual((shard/'cache_status.json').read_bytes(),snapshot)
+            ip.old.cache_state(ctx,shard)
+            stop.unlink()
+            with mock.patch.dict(os.environ,{'DINO_CAPTURE_PAUSE_FILE':str(stop)}):
+                self.assertEqual(capture_worker.run([],lambda argv:0),0)
+    def test_failed_checks_and_genuine_exceptions_are_not_converted_to_pause(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
+            root=Path(f);ctx,shards=shards_fixture(root);shard=shards['view'];stop=root/'pause.request';stop.touch()
+            csv=shard/'capture_verification.csv';rows=ip.old.csv_file(csv);rows[0]['verified']=False
+            def invoke(argv):
+                ip.old.write_csv(csv,rows)
+                raise ValueError('numerical failure')
+            with mock.patch.dict(os.environ,{'DINO_CAPTURE_PAUSE_FILE':str(stop)}):
+                with self.assertRaisesRegex(ValueError,'numerical failure'):capture_worker.run([],invoke)
+            self.assertFalse((shard/'worker_pause.json').exists())
+    def test_worker_patch_scoped_and_no_torch_import(self):
+        before=ip.old.common.available_ram
+        def invoke(argv):
+            self.assertIsNot(ip.old.common.available_ram,before)
+            with mock.patch.object(resources,'memory_snapshot',return_value=memory(64)):
+                self.assertEqual(ip.old.common.available_ram(),64*2**30)
+            self.assertNotIn('torch',sys.modules)
+            return 0
+        self.assertEqual(capture_worker.run([],invoke),0)
+        self.assertIs(ip.old.common.available_ram,before)
 
 
 if __name__=='__main__':unittest.main()

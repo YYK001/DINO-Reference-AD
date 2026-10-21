@@ -36,7 +36,7 @@ def capture_progress(run):
     return len({(p.parent.name,p.name) for root in roots for p in (root/'raw_cache').glob('*/*.npz')})
 
 
-def command(label,cmd,project,run,env,*,cancel_event=None):
+def command(label,cmd,project,run,env,*,cancel_event=None,allowed_returncodes=()):
     """Flush subprocess output and independent 30-second progress heartbeats."""
     say('STAGE='+label+' START');started=time.monotonic();last=started
     with (run/(label+'.log')).open('x',encoding='utf-8') as log:
@@ -70,7 +70,8 @@ def command(label,cmd,project,run,env,*,cancel_event=None):
             thread.join();p.stdout.close()
             (run/(label+'.exitcode')).write_text(str(p.returncode)+'\n')
     say(f'STAGE={label} EXIT_CODE={rc} SECONDS={time.monotonic()-started:.1f}')
-    if rc:raise RuntimeError(f'{label} failed: exit_code={rc}; see {run/(label+".log")}')
+    if rc and rc not in allowed_returncodes:raise RuntimeError(f'{label} failed: exit_code={rc}; see {run/(label+".log")}')
+    return rc
 
 
 def asset(root,preferred,name,directory=False):
@@ -187,7 +188,7 @@ def main(project,overlay_bytes=None,overlay_sha256=None,run_root=None,input_root
             image_state=str(frozen/'image_calibration_state.json'),data=str(found['data']),memory=str(found['memory']),
             checkpoint=str(found['checkpoint']),dinov3=str(project/'external_baselines/dinov3'),cache_root=str(run/'cache')),
             device='cuda:0',cpu_workers=4,capture_gpus=capture_gpus,
-            model_parallelism='two domain hosts; staggered loading; no pooled VRAM' if capture_gpus==2 else 'one original host',
+            model_parallelism='two domain hosts; working-set RAM; serial scheduling if needed; no pooled VRAM' if capture_gpus==2 else 'one original host',
             capture_devices={'view':'cuda:0','illumination':'cuda:1'} if capture_gpus==2 else {'both':'cuda:0'},
             memory_budget_gib=12,capture_min_free_vram_gib=14)
         write(run/'run_config.json',config)
@@ -208,11 +209,12 @@ importlib.import_module('industrial.model');importlib.import_module('dinov3.hub.
 assert importlib.metadata.version('adeval')=='1.1.0'
 from DINOv3.relation_reliability.official_metrics import validate_official_metric_backend
 validate_official_metric_backend()
-from DINOv3.MADEqual.aebad_s_neighborhood_segment_p0.inputs import available_ram
+from DINOv3.MADEqual.aebad_s_support_distance_crossdomain.resources import available_ram,memory_snapshot
+print('RAM_ACCOUNTING:',json.dumps(memory_snapshot()),flush=True)
 print('AVAILABLE_RAM_GiB:',available_ram()/2**30,'DISK_FREE_GiB:',shutil.disk_usage('/kaggle/working').free/2**30,flush=True)
 '''
         environment+=f'''\nassert torch.cuda.device_count()>={capture_gpus}, 'requested GPU count unavailable; no silent fallback'
-assert available_ram()>={24 if capture_gpus==2 else 12}*2**30, 'insufficient initial RAM for requested capture scheduling'
+assert available_ram()>={20 if capture_gpus==2 else 12}*2**30, 'insufficient initial RAM for requested capture scheduling'
 for device_index in range({capture_gpus}):
  assert torch.cuda.mem_get_info(device_index)[0]>=14*2**30, 'each requested GPU needs 14 GiB free VRAM'
 print('ENVIRONMENT_OK; no model constructed',flush=True)
