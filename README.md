@@ -47,6 +47,12 @@ Kaggle 更新代码后，官方源码路径为 `/kaggle/working/DINO-Reference-A
 
 ## 代码同步
 
+### AeBAD-S illumination / view 完整重跑与逐支持诊断
+
+入口与阶段说明：[跨域诊断 README](DINOv3/MADEqual/aebad_s_support_distance_crossdomain/README.md)。Kaggle 可直接 clone 后调用 `DINOv3.MADEqual.aebad_s_support_distance_crossdomain.kaggle.main(PROJECT)`：环境/Input核对 → 629张capture → 预测 → 精确CPU评价（12GiB预算） → 原CUDA AUPRO → 逐支持距离诊断 → 汇总与raw两个自动结果包。每30秒心跳，失败保留现场；仍需用户显式启动，无自动服务器连接。
+
+该工具的 `background_discovery_catalog.json` 是汇总需要的小型冻结参照，只含预设主描述量和覆盖/实例分组统计及原文件SHA，不含完整background结果、报告、图片或距离缓存。统计内核版本与catalog SHA严格核验，不把其内容当作新域验证结果。其余已完成产物、数据和模型仍不随代码上传。
+
 在服务器建立独立代码目录，由用户执行：
 
 ```bash
