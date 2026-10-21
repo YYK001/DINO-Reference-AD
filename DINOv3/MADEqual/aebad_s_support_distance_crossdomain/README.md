@@ -192,7 +192,7 @@ RUN = main(PROJECT)
 
 ### 双T4版本
 
-用户尚未启动旧Cell，并明确要求利用两张卡。当前GitHub入口默认`capture_gpus=2`，也可显式写`main(PROJECT, capture_gpus=2)`；只在手动选择`capture_gpus=1`时使用单卡。之前内嵌Notebook和旧commit是单卡快照，不会被静默改写，应使用本次新发布commit。
+单卡/双卡均可显式选择：`main(PROJECT, capture_gpus=1)`或`main(PROJECT, capture_gpus=2)`，本次没有修改已发布API的默认值。用户当前选择单卡。以下旧双卡资源准入/暂停说明为4bca8bc时期的历史记录，已被文末“资源只观测与离线续跑”规则覆盖。
 
 只改变capture的执行调度：图数更多的view（364张）先启动；首张capture登记后，再启动illumination（265张）。两进程通过CUDA_VISIBLE_DEVICES各自只看见一张卡，因此各自日志中的cuda:0分别对应外部GPU0和GPU1。每张图完整提取一次，原batch、float32、切窗、Source/Target NN、距离/1280、支持顺序及SEGMENT几何均保持不变。没有拆模型、拆batch或合并两卡显存。
 
@@ -209,3 +209,25 @@ RUN = main(PROJECT)
 失败会取消另一进程、等其退出后再打包，分路中已完成的raw也会被保留并尝试归档。合并状态保留各自原清单SHA。成功包只归档一套合并raw，不重复打包硬链接的另一份路径。
 
 双卡/资源/暂停共23项纯CPU测试，包含真实双CPU子进程的重叠、启动前串行退路、并行压力下专用暂停和串行续跑、同伴失败中止；还验证工作集核算、限额/缺stat边界、提交完整性、错误不转换、暂停后SHA及最后一张环境记录（GPU元数据使用替身，未验证CUDA）。合并产物继续接入原三分支预测和评分。真实双T4、实际页缓存可回收量和两套宿主RAM/显存峰值仍待本轮尝试验证。旧4.5–6小时估计仅适用于能持续并行；转为串行后接近此前单卡耗时，不能再按双卡加速估计。
+
+### 资源只观测与离线续跑（用户最新要求）
+
+资源是否够用由开跑前讨论决定。当前Kaggle入口及resume入口不再按RAM、VRAM或磁盘的剩余量/估算预算拒绝运行，双卡调度不再按容量自动暂停或串行。仍可显式选单卡/双卡，原默认值未修改。容量数值仅真实记录，不伪造“大可用量”，不清空系统缓存。真实MemoryError/CUDA OOM/磁盘写入错误会传播并保留输出。
+
+原历史方法文件不改动，以便继续读取e21f243f...冻结产物。resource_policy.py按精确白名单在运行时移除10条资源估算判断（capture 3、CPU评价3、精确像素预算1、AUPRO 2、诊断1），逐函数记录原源码与执行源码SHA及被移除条件；不复制评价数学实现。数值校验、输入/缓存SHA、样本范围、mask处理和原评价计算均保持。GPU是否存在、参数是否合法、输入是否完整属于执行条件，仍会正常报错。旧日志/字段中的历史guard数值不再代表本入口实际拦截。
+
+本轮失败发生在CPU评价启动前；629张捕获和预测均完成。已保存的Notebook Output可作为新Notebook Input挂载，另挂AeBAD888即可。无需Source memory、模型权重或原DINOv3源码Input；代码仍从仓库取得。不要重新调用全流程main()。
+
+```bash
+python -B -u -m DINOv3.MADEqual.aebad_s_support_distance_crossdomain.resume all \
+  --source-run /kaggle/input/实际挂载位置/aebad_full_crossdomain_20261021_123058_823a60 \
+  --data /kaggle/input/datasets/yky2026/aebad888/AeBAD/AeBAD_S \
+  --output-dir /kaggle/working/aebad_evaluation_resume_独立新目录 \
+  --cpu-workers 4 --device cuda:0 --memory-budget-gib 12
+```
+
+resume复用当前实验的冻结原单卡AUPRO后端；不执行capture/prepare或特征提取。顺序为CPU全像素精确评价、原GPU AUPRO、纯CPU跨域描述诊断。每阶段独立子进程，CPU诊断不会因为前面的Torch导入而失败。准备时验证629张已冻结的源清单及原身份，原图/GT按实际评价继续验证；CPU结束仍运行原核查，不新增全域推理。
+
+原Output只读：新目录仅复制小元数据和MAD，cache/prediction通过Linux目录链接使用原文件，避免复制整个大缓存；不是重写原输入身份。最后生成独立SUCCESS_SUMMARY或FAILED_SUMMARY包，包含新结果、资源策略及源缓存/预测元数据，不包含外部符号链接或重复的raw/预测NPZ。原RAW_AND_REFERENCES.tar必须另行保留，摘要不能代替距离缓存。已下载tar约2.446GB（约2.28GiB）。
+
+本地验证使用真实NumPy精确指标内核检查“预算为0仍计算且数值不变”、真实分配异常/非有限输入仍报错、资源数值不被伪造、原源码SHA不变，并用实际失败摘要验证原e21f243f...身份及源元数据不变。Windows的准备测试仅将目录链接操作替换成小元数据拷贝；真实Linux链接、完整629张评价、AUPRO和诊断仍需在挂载完整Output后执行，不宣称已通过真实链路。

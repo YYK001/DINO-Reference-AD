@@ -108,16 +108,12 @@ def pack(run,state):
     state['raw_archive']=None;state['raw_archive_error']=None
     if any('raw_cache' in p.relative_to(run).parts for p in raw):
         archive=run.parent/(run.name+'_RAW_AND_REFERENCES.tar')
-        needed=sum(p.stat().st_size for p in raw)+len(raw)*2048+(128<<20)
-        if shutil.disk_usage(run).free<needed:
-            state['raw_archive_error']='insufficient disk; original raw retained; no deletion'
-        else:
-            try:
-                say('PACKING_RAW='+str(archive))
-                with tarfile.open(archive,'x') as t:
-                    for p in raw:t.add(p,arcname=run.name+'/'+p.relative_to(run).as_posix(),recursive=False)
-                state['raw_archive']=str(archive);state['raw_archive_bytes']=archive.stat().st_size
-            except Exception as exc:state['raw_archive_error']=f'{type(exc).__name__}: {exc}'
+        try:
+            say('PACKING_RAW='+str(archive))
+            with tarfile.open(archive,'x') as t:
+                for p in raw:t.add(p,arcname=run.name+'/'+p.relative_to(run).as_posix(),recursive=False)
+            state['raw_archive']=str(archive);state['raw_archive_bytes']=archive.stat().st_size
+        except Exception as exc:state['raw_archive_error']=f'{type(exc).__name__}: {exc}'
     state['experiment_success']=bool(state['computation_success'] and state['raw_archive'])
     write(run/'pipeline_status.json',state)
     summary=run.parent/(run.name+('_SUCCESS_SUMMARY.tar.gz' if state['experiment_success'] else '_FAILED_SUMMARY.tar.gz'))
@@ -188,7 +184,7 @@ def main(project,overlay_bytes=None,overlay_sha256=None,run_root=None,input_root
             image_state=str(frozen/'image_calibration_state.json'),data=str(found['data']),memory=str(found['memory']),
             checkpoint=str(found['checkpoint']),dinov3=str(project/'external_baselines/dinov3'),cache_root=str(run/'cache')),
             device='cuda:0',cpu_workers=4,capture_gpus=capture_gpus,
-            model_parallelism='two domain hosts; working-set RAM; serial scheduling if needed; no pooled VRAM' if capture_gpus==2 else 'one original host',
+            capacity_estimates_enforced=False,model_parallelism='two domain hosts; capacity observations only; no pooled VRAM' if capture_gpus==2 else 'one original host',
             capture_devices={'view':'cuda:0','illumination':'cuda:1'} if capture_gpus==2 else {'both':'cuda:0'},
             memory_budget_gib=12,capture_min_free_vram_gib=14)
         write(run/'run_config.json',config)
@@ -214,10 +210,7 @@ print('RAM_ACCOUNTING:',json.dumps(memory_snapshot()),flush=True)
 print('AVAILABLE_RAM_GiB:',available_ram()/2**30,'DISK_FREE_GiB:',shutil.disk_usage('/kaggle/working').free/2**30,flush=True)
 '''
         environment+=f'''\nassert torch.cuda.device_count()>={capture_gpus}, 'requested GPU count unavailable; no silent fallback'
-assert available_ram()>={20 if capture_gpus==2 else 12}*2**30, 'insufficient initial RAM for requested capture scheduling'
-for device_index in range({capture_gpus}):
- assert torch.cuda.mem_get_info(device_index)[0]>=14*2**30, 'each requested GPU needs 14 GiB free VRAM'
-print('ENVIRONMENT_OK; no model constructed',flush=True)
+print('ENVIRONMENT_OK; capacity observed only; no model constructed',flush=True)
 '''
         label='environment';command(label,[sys.executable,'-B','-u','-c',environment],project,run,env)
         common=[]
@@ -225,7 +218,7 @@ print('ENVIRONMENT_OK; no model constructed',flush=True)
         common+=['--official',str(project/'external_baselines/SuperADD'),'--domain','both','--device','cuda:0',
                  '--cpu-workers','4','--capture-min-free-vram-gib','14']
         def stage(name,*args):
-            command(name,[sys.executable,'-B','-u','-m',OLD,name,*common,*args],project,run,env)
+            command(name,[sys.executable,'-B','-u','-m','DINOv3.MADEqual.aebad_s_support_distance_crossdomain.execution_worker',name,*common,*args],project,run,env)
             state['stages'].append(name);write(run/'pipeline_status.json',state)
         label='preflight';stage(label,'--no-write')
         label='capture'
@@ -246,7 +239,7 @@ print('ENVIRONMENT_OK; no model constructed',flush=True)
             '--output-dir',str(run/'aupro'),'--aupro-allocator-limit-gib','1.5')
         if not ip.old.read_json(run/'aupro/status.json')['all_metrics_complete']:raise ValueError('AUPRO/metrics incomplete')
         label='diagnostic'
-        command(label,[sys.executable,'-B','-u','-m',NEW,'analyze','--parent-run',str(run),
+        command(label,[sys.executable,'-B','-u','-m','DINOv3.MADEqual.aebad_s_support_distance_crossdomain.execution_worker','diagnostic','analyze','--parent-run',str(run),
             '--data',str(found['data']),'--background',str(background),'--cpu-workers','4',
             '--output-dir',str(run/'diagnostic')],project,run,env)
         s=ip.old.read_json(run/'diagnostic/status.json')

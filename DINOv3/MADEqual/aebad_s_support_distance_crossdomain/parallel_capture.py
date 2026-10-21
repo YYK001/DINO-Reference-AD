@@ -12,13 +12,6 @@ import time
 from . import inputs as ip,resources
 from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0.verification import audit
 
-# The probe and this guard require 20 GiB of working-set headroom, crediting
-# inactive file cache only. SECOND_RAM matches the original capture's 12 GiB.
-INITIAL_RAM=20*2**30
-SECOND_RAM=12*2**30
-RUNNING_RAM_FLOOR=2*2**30
-
-
 def commands(common,run_root):
     import sys
     worker='DINOv3.MADEqual.aebad_s_support_distance_crossdomain.capture_worker'
@@ -44,95 +37,44 @@ def committed_raw(root):
 
 
 def run(commands,project,run_root,env,execute):
-    """Start view on GPU0; start illumination/GPU1 after view's first capture.
-
-    Inactive file cache receives working-set credit. Insufficient second-host
-    RAM defers it; runtime pressure pauses it at a verified commit, then resumes
-    serially. Genuine model/numerical errors are never converted to success.
-    """
+    """Two explicit GPU workers; resource observations never gate execution."""
     if set(commands)!=set(ip.DOMAINS):raise ValueError('exactly the two frozen domains required')
-    snapshot=resources.memory_snapshot();ram=snapshot['effective_available_bytes']
-    if ram<INITIAL_RAM:raise MemoryError('capture needs 20 GiB initial effective RAM after preflight; outputs retained')
-    environments=device_environments(env)
-    plan=dict(devices={'view':'cuda:0','illumination':'cuda:1'},start_policy='view_first_committed_raw_then_illumination',
-        child_visible_devices={d:e['CUDA_VISIBLE_DEVICES'] for d,e in environments.items()},child_device='cuda:0',
-        initial_available_ram_bytes=ram,initial_memory=snapshot,
-        initial_required_ram_bytes=INITIAL_RAM,second_required_ram_bytes=SECOND_RAM,
-        running_available_ram_floor_bytes=RUNNING_RAM_FLOOR,
-        extraction_batch_changed=False,precision_changed=False,Source_memory_rebuilt=False,
-        RAM_estimate_role='working-set admission; only inactive file cache credited; not a peak guarantee',
-        execution_mode='staggered_parallel',memory_observations=0)
-    ip.write_json(run_root/'parallel_capture_plan.json',plan)
-    cancel=threading.Event();pause=run_root/'pause_illumination.request';last_log=0
+    environments=device_environments(env);cancel=threading.Event()
+    plan=dict(devices={'view':'cuda:0','illumination':'cuda:1'},
+        start_policy='view_first_committed_raw_then_illumination',
+        child_visible_devices={d:e['CUDA_VISIBLE_DEVICES'] for d,e in environments.items()},
+        child_device='cuda:0',capacity_estimates_enforced=False,
+        execution_mode='staggered_parallel',initial_memory=resources.memory_snapshot(),
+        extraction_batch_changed=False,precision_changed=False,Source_memory_rebuilt=False)
+    ip.write_json(run_root/'parallel_capture_plan.json',plan);last_log=0
     def observe():
         nonlocal last_log
-        value=resources.memory_snapshot();effective=value['effective_available_bytes']
-        plan['latest_memory']=value;plan['memory_observations']+=1
-        if effective<plan.get('minimum_observed_available_ram_bytes',float('inf')):
-            plan['minimum_observed_available_ram_bytes']=effective;plan['minimum_memory']=value
-        for name in ('cgroup_current_bytes','cgroup_anon_bytes'):
-            if value.get(name) is not None:plan['peak_'+name]=max(plan.get('peak_'+name,0),value[name])
+        value=resources.memory_snapshot();plan['latest_memory']=value
         now=time.monotonic()
         if now-last_log>=30:
-            print('[capture RAM] strict=%.2f GiB inactive_file_credit=%.2f GiB effective=%.2f GiB' %
-                (value['strict_available_bytes']/2**30,value['inactive_file_reclaim_credit_bytes']/2**30,effective/2**30),flush=True)
+            print('[capture RAM observation only] strict=%.2f GiB effective=%.2f GiB' %
+                (value['strict_available_bytes']/2**30,value['effective_available_bytes']/2**30),flush=True)
             last_log=now
         ip.write_json(run_root/'parallel_capture_plan.json',plan)
-        return effective
     with ThreadPoolExecutor(max_workers=2) as pool:
         def submit(domain,label):
-            worker_env=dict(environments[domain])
-            if domain=='illumination':worker_env['DINO_CAPTURE_PAUSE_FILE']=str(pause)
-            else:worker_env.pop('DINO_CAPTURE_PAUSE_FILE',None)
-            return pool.submit(execute,label,commands[domain],project,run_root,worker_env,
-                cancel_event=cancel,allowed_returncodes=(75,))
+            worker_env=dict(environments[domain]);worker_env.pop('DINO_CAPTURE_PAUSE_FILE',None)
+            return pool.submit(execute,label,commands[domain],project,run_root,worker_env,cancel_event=cancel)
         first=submit('view','capture_view')
-        def finish(active,second=None):
-            paused=False
-            while active:
-                done,active=wait(active,timeout=1,return_when=FIRST_COMPLETED)
-                for future in done:
-                    rc=future.result()
-                    if rc==75:
-                        if future is not second or not pause.is_file():raise RuntimeError('unexpected capture pause')
-                        if plan['execution_mode']=='staggered_parallel':
-                            plan['execution_mode']='parallel_then_serial_child_RAM_admission'
-                            print('[capture scheduling] child RAM admission deferred illumination; it will resume after view',flush=True)
-                        paused=True
-                ram=observe()
-                if active and ram<RUNNING_RAM_FLOOR:
-                    if second is not None and first in active and second in active:
-                        if not pause.exists():
-                            pause.write_text('pause at next verified commit\n')
-                            plan['execution_mode']='parallel_then_serial_RAM_pressure'
-                            print('[capture scheduling] RAM pressure: illumination will pause at a verified commit, then resume after view',flush=True)
-                    elif not pause.exists():raise MemoryError('single active host has less than 2 GiB effective RAM headroom; outputs retained')
-            return paused
         try:
             while not committed_raw(run_root/'capture_shards/view'):
                 if first.done():
-                    first.result()
-                    raise ValueError('view exited without a committed capture')
+                    first.result();raise ValueError('view exited without a committed capture')
                 time.sleep(.25)
             if first.done():first.result()
-            ram=observe();plan['second_start_available_ram_bytes']=ram
-            ip.write_json(run_root/'parallel_capture_plan.json',plan)
-            if ram<SECOND_RAM:
-                plan['execution_mode']='serial_insufficient_second_host_RAM'
-                print('[capture scheduling] second host deferred: finish view first, then illumination; unchanged math',flush=True)
-                finish({first});second=submit('illumination','capture_illumination')
-                finish({second})
-            else:
-                second=submit('illumination','capture_illumination')
-                if finish({first,second},second):
-                    pause.unlink()
-                    second=submit('illumination','capture_illumination_serial_resume')
-                    finish({second})
+            observe();second=submit('illumination','capture_illumination');active={first,second}
+            while active:
+                done,active=wait(active,timeout=1,return_when=FIRST_COMPLETED)
+                for future in done:future.result()
+                observe()
         except BaseException as exc:
-            cancel.set()
-            plan.update(status='parallel_capture_failed',error=f'{type(exc).__name__}: {exc}')
-            ip.write_json(run_root/'parallel_capture_plan.json',plan)
-            raise
+            cancel.set();plan.update(status='parallel_capture_failed',error=f'{type(exc).__name__}: {exc}')
+            ip.write_json(run_root/'parallel_capture_plan.json',plan);raise
     plan['status']='both_capture_processes_succeeded';ip.write_json(run_root/'parallel_capture_plan.json',plan)
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 from unittest.mock import patch
 from . import inputs as ip,resources
+from .resource_policy import observation_only
 
 PAUSED=75
 
@@ -22,16 +23,6 @@ def run(argv=None,invoke=None):
         invoke=main
     stop=os.environ.get('DINO_CAPTURE_PAUSE_FILE')
     original=ip.old.write_csv
-    def admitted_ram():
-        ram=resources.available_ram()
-        if stop and ram<12*2**30:
-            # The child's imports may consume headroom after the parent's
-            # admission. Defer before allocating the host; do not let this
-            # scheduling decision become the original capture_failed state.
-            Path(stop).write_text('second-host startup needs 12 GiB effective RAM\n')
-            ip.write_json(Path(stop).parent/'illumination_startup_RAM.json',resources.memory_snapshot())
-            raise CapturePaused()
-        return ram
     def checkpoint(path,rows,*args,**kwargs):
         original(path,rows,*args,**kwargs)
         if not stop or not Path(stop).is_file() or Path(path).name!='capture_verification.csv':return
@@ -59,7 +50,7 @@ def run(argv=None,invoke=None):
             memory=resources.memory_snapshot()))
         raise CapturePaused()
     try:
-        with patch.object(ip.old.common,'available_ram',admitted_ram),patch.object(ip.old,'write_csv',checkpoint):
+        with observation_only(),patch.object(ip.old,'write_csv',checkpoint):
             return invoke(sys.argv[1:] if argv is None else argv)
     except CapturePaused:
         print('[capture worker] paused after verified commit; resume will check original hashes',flush=True)

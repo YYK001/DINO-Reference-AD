@@ -163,45 +163,12 @@ class DomainScheduler(unittest.TestCase):
             self.assertNotEqual((root/'capture_view.exitcode').read_text().strip(),'0')
             self.assertFalse((root/'view_finished').exists())
             self.assertTrue((root/'capture_shards/view/raw_cache/view/test_first.npz').is_file())
-    def test_insufficient_ram_refuses_before_model_start(self):
-        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',return_value=memory(19)):
-            execute=mock.Mock()
-            with self.assertRaisesRegex(MemoryError,'20 GiB'):pc.run({'view':[],'illumination':[]},ip.ROOT,Path(f),None,execute)
-            execute.assert_not_called()
-    def test_single_active_host_pressure_fails_without_method_downgrade(self):
-        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',side_effect=[memory(64),memory(8),memory(1)]):
-            root=Path(f);commands=cpu_commands(root)
-            commands['view'][3]=commands['view'][3].replace('time.sleep(.8)','time.sleep(5)')
-            commands['illumination'][3]+='\ntime.sleep(5)'
-            with self.assertRaisesRegex(MemoryError,'less than 2 GiB'):pc.run(commands,ip.ROOT,root,None,kaggle.command)
-            self.assertFalse((root/'view_finished').exists())
-    def test_low_second_host_ram_finishes_first_instead_of_aborting(self):
-        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',side_effect=lambda: memory(8 if (Path(f)/'capture_shards/view/cache_status.json').exists() and not (Path(f)/'view_finished').exists() else 64)):
+    def test_low_ram_observation_never_gates_or_pauses_workers(self):
+        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f,mock.patch.object(resources,'memory_snapshot',return_value=memory(.1)):
             root=Path(f);pc.run(cpu_commands(root),ip.ROOT,root,None,kaggle.command)
-            self.assertGreater(float((root/'illumination_started').read_text()),float((root/'view_finished').read_text()))
-            self.assertEqual(ip.old.read_json(root/'parallel_capture_plan.json')['execution_mode'],'serial_insufficient_second_host_RAM')
-    def test_parallel_pressure_pauses_then_resumes_second_after_first_exits(self):
-        with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
-            root=Path(f);commands=cpu_commands(root)
-            commands['view'][3]=commands['view'][3].replace('time.sleep(.8)','time.sleep(2)')
-            commands['illumination'][3]+="""
-import os
-p=Path(os.environ['DINO_CAPTURE_PAUSE_FILE'])
-if not (root/'paused_once').exists():
- while not p.exists():time.sleep(.01)
- (root/'paused_once').write_text('1')
- raise SystemExit(75)
-assert (root/'view_finished').exists()
-"""
-            calls=[memory(64),memory(64)]
-            def snapshot():
-                if calls:return calls.pop(0)
-                return memory(1 if not (root/'paused_once').exists() else 64)
-            with mock.patch.object(resources,'memory_snapshot',side_effect=snapshot):pc.run(commands,ip.ROOT,root,None,kaggle.command)
-            self.assertEqual((root/'capture_illumination.exitcode').read_text().strip(),'75')
-            self.assertEqual((root/'capture_illumination_serial_resume.exitcode').read_text().strip(),'0')
-            self.assertGreater(float((root/'illumination_started').read_text()),float((root/'view_finished').read_text()))
-            self.assertEqual(ip.old.read_json(root/'parallel_capture_plan.json')['execution_mode'],'parallel_then_serial_RAM_pressure')
+            self.assertLess(float((root/'illumination_started').read_text()),float((root/'view_finished').read_text()))
+            self.assertFalse((root/'pause_illumination.request').exists())
+            self.assertFalse(ip.old.read_json(root/'parallel_capture_plan.json')['capacity_estimates_enforced'])
     def test_progress_and_failed_pack_include_shards_without_double_count(self):
         with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
             root=Path(f)/'run';root.mkdir();p=root/'capture_shards/view/raw_cache/view/test_same.npz'
@@ -243,14 +210,15 @@ class WorkingSetAccounting(unittest.TestCase):
 
 
 class WorkerCheckpoints(unittest.TestCase):
-    def test_second_host_import_overhead_defers_before_host_allocation(self):
+    def test_low_memory_measurement_is_not_replaced_or_used_to_defer(self):
         with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
             stop=Path(f)/'pause.request'
             def invoke(argv):
-                ip.old.common.available_ram();self.fail('must not reach model loading')
-            with mock.patch.dict(os.environ,{'DINO_CAPTURE_PAUSE_FILE':str(stop)}),mock.patch.object(resources,'memory_snapshot',return_value=memory(11)):
-                self.assertEqual(capture_worker.run([],invoke),75)
-            self.assertTrue(stop.exists())
+                self.assertEqual(ip.old.common.available_ram(),1)
+                return 0
+            with mock.patch.dict(os.environ,{'DINO_CAPTURE_PAUSE_FILE':str(stop)}),mock.patch.object(ip.old.common,'available_ram',return_value=1):
+                self.assertEqual(capture_worker.run([],invoke),0)
+            self.assertFalse(stop.exists())
     def test_pause_preserves_environment_when_last_image_needs_cache_only_resume(self):
         with tempfile.TemporaryDirectory(dir=ip.ROOT) as f:
             root=Path(f);ctx,shards=shards_fixture(root);shard=shards['view'];stop=root/'pause.request';stop.touch()
@@ -295,9 +263,7 @@ class WorkerCheckpoints(unittest.TestCase):
     def test_worker_patch_scoped_and_no_torch_import(self):
         before=ip.old.common.available_ram
         def invoke(argv):
-            self.assertIsNot(ip.old.common.available_ram,before)
-            with mock.patch.object(resources,'memory_snapshot',return_value=memory(64)):
-                self.assertEqual(ip.old.common.available_ram(),64*2**30)
+            self.assertIs(ip.old.common.available_ram,before)
             self.assertNotIn('torch',sys.modules)
             return 0
         self.assertEqual(capture_worker.run([],invoke),0)
