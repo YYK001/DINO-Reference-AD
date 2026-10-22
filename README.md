@@ -86,3 +86,9 @@ AutoDL 后续统一用上述独立 clone / `git pull --ff-only` 更新代码，�
 `external_baselines/SuperADD` 为必要宿主源码，其 [LICENSE](external_baselines/SuperADD/LICENSE)、[NOTICE](external_baselines/SuperADD/NOTICE)、[CITATION.cff](external_baselines/SuperADD/CITATION.cff) 和第三方声明保留原内容；适用原 CC BY-NC 4.0 等声明。
 
 `external_baselines/dinov3` 来自 [Meta 官方仓库](https://github.com/facebookresearch/dinov3)，保留原 Python 包、配置和附属源文件、hub 入口、依赖/构建清单、README、[LICENSE.md](external_baselines/dinov3/LICENSE.md) 与 [MODEL_CARD.md](external_baselines/dinov3/MODEL_CARD.md)。这些文件未经修改，适用 DINOv3 License Agreement；没有打包权重、上游 Git 历史、Notebook 和 CI。上游 commit 与逐文件 SHA-256 记录于 [UPSTREAM.json](external_baselines/dinov3/UPSTREAM.json)。该 commit 标识本次本地源码来源，尚未证明它与历史 AutoDL 提取时使用的源码版本完全相同；正式提取仍须通过冻结基线复核。
+
+## 跨支持图佐证的局部参照扩展：固定P0
+
+[运行说明](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/implementation_audit.md)。冻结三域原K8与926张名单，比较UNION、SEGMENT、第三图佐证连接与等量均匀缩距。独立支持间k5、整图留一、缓存预测、CPU精确评价与6项原CUDA AUPRO，不修改旧分支列表。
+
+显式`recover-support`只恢复丢失的24张原正常支持特征；`verify-support`核对所有原缓存SEGMENT和端点长度，再允许带新来源身份的支持接入。历史特征SHA保持不变，不能声称新银行与缺失Q的原检索逐位相同。`portable`传输冻结父输入，`autodl`按用户指令串联完整流程，明确单/双卡、30秒心跳、中断续跑及成功后可选关机；失败保留现场。代码、CPU合成测试及输入可迁移性已验证，真实模型/CUDA/完整实验仍须用户显式启动。冻结资产和本机验证日志不在GitHub。

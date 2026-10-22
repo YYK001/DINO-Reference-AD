@@ -6,7 +6,7 @@ from DINOv3.MADEqual.aebad_s_support_distance_diagnostic.analysis import STAT_FI
 from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.scoring import statistics,ch1_score
 from DINOv3.MADEqual.aebad_s_projection_layer_diagnostic.numerics import reconstruct,adaptive_max,check
 from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0.verification import historical_score
-from . import inputs as ip
+from . import inputs as ip, spatial_audit
 
 
 def scoped(row,domain):
@@ -84,7 +84,7 @@ def one_image(parent,sample,record,blob,data_path,image_id):
     instances=[];links=[];stencils=[]
     if group:
         ctx,origins=spatial_context(parent,sample,gt,maps)
-        instances=bs.instance_analysis(ctx,sample,gt,maps,raw,meta,profiles,checks,links.append,stencils.append)
+        instances=spatial_audit.instance_analysis(ctx,sample,gt,maps,raw,meta,profiles,checks,links.append,stencils.append)
         for r in instances:
             r['UNION_instance_coordinate_origin']=origins[r['instance_id'],'instance']
             r['UNION_ring_coordinate_origin']=origins[r['instance_id'],'ring']
