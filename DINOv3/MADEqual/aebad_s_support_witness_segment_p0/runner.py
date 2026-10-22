@@ -19,6 +19,8 @@ def parser():
     p.add_argument('--output-dir',type=Path,default=ip.parent.ROOT/'DINOv3/outputs/mad_equal/aebad_s_support_witness_fixed_p0_v1')
     p.add_argument('--support-root',action='append',type=Path,default=[])
     p.add_argument('--recovered-supports',type=Path,help='explicit independently verified new support provenance; never changes historical SHA')
+    p.add_argument('--reuse-recovery',type=Path,help='verify-support: original sealed extraction, read only')
+    p.add_argument('--recovery-policy',choices=('strict','historical-maps-v1'),default='strict')
     p.add_argument('--checkpoint',type=Path,help='recover-support only; never needed by later offline stages')
     p.add_argument('--dinov3',type=Path,default=ip.parent.ROOT/'external_baselines/dinov3')
     p.add_argument('--domains',nargs='+',choices=ip.DOMAINS,default=list(ip.DOMAINS))
@@ -111,8 +113,18 @@ def main(argv=None):
                 else:result=recovery.extract(bundle,a.recovered_supports,spec,host_paths,a.domains,a.devices[0])
             else:
                 if a.no_write:raise ValueError('verify-support writes only the independent recovery provenance')
-                result=recovery.verify(bundle,a.recovered_supports)
-            print(json.dumps(dict(stage=a.stage,status='requested_stage_complete',result=result),ensure_ascii=False),flush=True)
+                if a.recovery_policy=='historical-maps-v1':
+                    from .compatibility import verify
+                    if a.reuse_recovery is None:raise ValueError('explicit --reuse-recovery required for new historical certificate')
+                    result=verify(bundle,a.recovered_supports,a.reuse_recovery,a.cpu_workers)
+                else:
+                    if a.reuse_recovery is not None:raise ValueError('reusing old extraction requires explicit --recovery-policy historical-maps-v1')
+                    result=recovery.verify(bundle,a.recovered_supports)
+            # Full attestations stay in JSON; never dump all629 parent records
+            # as a single console line when a recovery certificate completes.
+            keys=('status','images','new','reused','seconds','strict_distance_compatible','support_forward_calls','query_forward_calls','model_loaded','jobs','devices')
+            summary={k:result[k] for k in keys if k in result}
+            print(json.dumps(dict(stage=a.stage,status='requested_stage_complete',output=str(a.recovered_supports),result=summary),ensure_ascii=False),flush=True)
             return 0
         if a.stage=='preflight':
             report=ip.preflight(bundle,roots,a.domains,scan=True);print(json.dumps(report,ensure_ascii=False,indent=2));return 0 if not report['missing_inputs'] else 2

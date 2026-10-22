@@ -129,7 +129,7 @@ tail -n 40 -f "${RUN}_launcher.log"
 
 恢复文件独立封存于`recovered_supports/features/`，每个文件的record包含原图片SHA、历史特征SHA及“显式重新提取”标记。`recovery_inputs.json`冻结宿主配置、checkpoint、官方源码、提取入口、精度和原capture记录。中断后核对先前文件SHA；孤立/未提交NPZ不会被重新提取覆盖或补认可。
 
-`verify-support`逐域逐层加载新特征，对926份原缓存的稳定Top2端点，调用原`geometry_layer`，核对**原SEGMENT距离与原endpoint_length**，继续使用`1e-7 + 1e-6*abs(reference)`。长度复核避免Source的min把支持变化掩盖。失败不放宽容差，不进入邻居准备。各域层检查独立seal，可续跑；全部通过才生成`verified_manifest.json`及独立seal。
+默认严格模式的`verify-support`逐域逐层加载新特征，对926份原缓存的稳定Top2端点，调用原`geometry_layer`，核对**原SEGMENT距离与原endpoint_length**，继续使用`1e-7 + 1e-6*abs(reference)`。长度复核避免Source的min把支持变化掩盖。失败不放宽容差，不进入邻居准备。各域层检查独立seal，可续跑；全部通过才生成`verified_manifest.json`及独立seal。
 
 后续`--recovered-supports`要求上述封存链完整，保留`historical_feature_sha256`与当前`feature_sha256`两个字段，把新manifest纳入本轮身份；不修改原capture/inputs或历史SHA。未显式传此参数的路径仍严格只接受历史NPZ SHA。
 
@@ -198,3 +198,45 @@ cost.json及cost_records分别记录支持间检索、连接判定、留一、�
 同日P2修复后的最新回归为42项通过（10.070秒），新增8项覆盖CPU中间指标独立封存和中断续跑。合法结果无需重做排序；未封存、修改过或语义无效的结果会明确拒绝，不自动重新认可。12份Python源文件内存编译仍通过。没有真实支持检索、GPU或全域评价；方法和评价口径未变。代码身份随修复更新，已有其他代码身份的运行目录仍按原规则拒绝混用。
 
 2026-10-22恢复与编排新增14项CPU测试通过（2.097秒），与原42项回归合计56项。新增测试执行真实小型恢复NPZ/封存、原geometry_layer、整批几何审核、portable打包恢复；宿主提取和流水线GPU/关机调用由替身隔离，不能写作真实CUDA或服务器运行通过。
+
+## 2026-10-23：跨环境恢复兼容入口（显式选择）
+
+用户服务器的独立CPU审计覆盖illumination265张和view364张、全部四层。原缓存自身的SEGMENT地图SHA及CH1/CURRENT分数复现通过；恢复几何相对原缓存的分数最大差分别约2.12e-6/2.38e-6和2.16e-6/1.91e-6，融合图最大差分别约4.57e-5与1.70e-5，view有2张峰值位置改变。此为用户提供的真实服务器审计，不是本地GPU实验。原距离严格检查并未全部通过，不能将这些结果改写成逐位复现或图像/像素完全等价。
+
+默认strict不变。需要继续时显式指定`--reuse-recovery <原提取目录> --recovery-policy historical-maps-v1`，另建全新运行目录。跳过模型加载和支持提取，从原24份独立封存的NPZ读取完整特征，**不修改原recovery_inputs、NPZ/record、旧几何失败和旧audit**。新的兼容证书与新的方法运行身份分开保存，不能对旧目录原地改协议。
+
+新政策是恢复数据接入的工程兼容规则，**不是原逐点距离容差被判定通过**，不是WITNESS检测规则：
+
+| 核查 | 固定要求 |
+|---|---|
+| 图片/支持顺序、原QUERY/PRECISION、checkpoint、宿主配置、文件及record SHA | 与已冻结提取记录及父输入严格一致 |
+| 原缓存自身重建 | 原地图SHA相同，CH1/CURRENT仍按1e-5复核 |
+| 恢复几何的各层最大响应贡献 | `max(abs(S_recovered-S_old))/Source_patch_scale/4 <= 1e-4` |
+| 恢复几何的四层融合定位图 | 完整地图最大绝对差<=1e-4，单位为冻结Source MAD响应 |
+| 恢复几何的CH1和CURRENT | 每张图两项分数变化均<=1e-5，沿用原评分容差 |
+| 原SEGMENT距离和端点长度严格检验 | 继续记录1e-7/1e-6下的真实失败数量，不重标为通过 |
+
+地图1e-4是该**新兼容政策**的明确工程限值，不宣称它原本就是历史地图逐位验证口径。逐层除4来自原等权融合，避免大层误差经抵消后只凭最终图过关。它不进入检测分数、佐证alpha/rho/k5或缩距公式，也不根据GT、AUROC/AP选择。几何内部原三角形/有限性/距离修正规则保持不变，真正数学错误继续失败。
+
+新证书必须重新计算全部926张CPU几何/地图/分数并逐域独立封存，不能从之前未封存的审计汇总补写可信SHA。原提取文件按先前记录SHA复核，禁止重新认可已修改文件；证书、逐域结果或seal被改、缺失或不完整均失败。只复用完整已封存作业。没有checkpoint、memory加载、Source MAD拟合或GPU前向。
+
+```bash
+cd /root/autodl-tmp/DINO-Reference-AD
+git pull --ff-only
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+RUN=/root/autodl-tmp/aebad_s_witness_compat_$(date +%Y%m%d_%H%M%S)
+nohup /root/miniconda3/bin/python -B -u -m DINOv3.MADEqual.aebad_s_support_witness_segment_p0.autodl \
+  --run-root "$RUN" \
+  --reuse-recovery /root/autodl-tmp/aebad_s_witness_20261022_193510/recovered_supports \
+  --recovery-policy historical-maps-v1 \
+  --data /root/autodl-tmp/datasets/AeBAD/AeBAD_S \
+  --checkpoint /root/autodl-tmp/DINO-NVS/external_baselines/SuperADD/weights/dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth \
+  --devices cuda:0 --cpu-workers 8 --shutdown-on-success \
+  > "${RUN}_launcher.log" 2>&1 < /dev/null &
+printf 'PID=%s\nRUN=%s\nLOG=%s\n' "$!" "$RUN" "${RUN}_launcher.log"
+tail -n 40 -f "${RUN}_launcher.log"
+```
+
+checkpoint参数保留旧启动接口，复用模式不读取权重或构建模型。环境检查仍验证正式近邻/AUPRO依赖。成功后关机，失败不关机；单/双GPU仍显式选择。先生成新证书，然后继续邻居准备、留一、预测、CPU指标、原AUPRO与完整汇总。
+
+最终status单独保留`historical_strict_distance_compatible`及失败数；`numerical_failed_checks`只指正式冻结预测/地图/分数，不把历史恢复差异隐去。objective_report必须说明使用恢复银行，历史分数差小不代表所有像素排序、原八支持Top1或WITNESS离散门控完全不变。没有原Q/旧完整支持，后二者仍未验证；这不是原特征逐位复现的结论。

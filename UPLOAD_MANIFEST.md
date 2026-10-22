@@ -534,3 +534,19 @@ DINOv3/MADEqual/aebad_s_witness_recovery_audit.py
 DINOv3/tests/test_aebad_s_witness_recovery_audit.py
 ```
 只含独立CPU审计与测试，不含服务器结果或特征。
+
+## 2026-10-23 历史恢复兼容政策
+
+```text
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/compatibility.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/autodl.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/inputs.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/recovery.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/reporting.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/runner.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README.md
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_witness_recovery_audit.py
+DINOv3/tests/test_aebad_s_witness_recovery_compatibility.py
+```
+不包含支持特征、服务器审计或任何正式结果。

@@ -102,3 +102,7 @@ python -B -u -m DINOv3.MADEqual.aebad_s_witness_recovery_audit --run-root /actua
 ```
 
 默认完整illumination/view两域629张、四层，不重提特征、不读取GT、不调用Torch或GPU。只观察原始距离、端点长度、Source MAD尺度误差、原定位图及CH1/CURRENT分数变化；严格失败继续保留，不把审计完成写成实验通过。相同旧缓存的地图SHA和分数仍严格复核。结果写到独立drift_audit目录，冻结WITNESS源码和原恢复seal保持不变。六项合成CPU测试通过，不代表真实跨环境审计已通过。
+
+### 复用已封存支持的历史恢复兼容运行
+
+WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取目录> --recovery-policy historical-maps-v1`可在新的运行目录生成独立CPU兼容证书，复用24份特征而不重提。支持/图片/精度/配置及文件SHA严格核验，原缓存地图SHA与评分严格复核；恢复几何的各层等权MAD贡献和融合地图差<=1e-4，CH1/CURRENT差<=原1e-5。原逐点距离失败继续保留，不改写为严格复现，不更改检测公式或历史地图。完整复核后才执行正式支持检索/留一/预测/评价。详见[历史兼容政策与完整命令](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README.md)。本地72项CPU回归通过，真实兼容证书、GPU支持检索和新分支指标仍由用户执行。

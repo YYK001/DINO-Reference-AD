@@ -189,6 +189,9 @@ def verify(bundle,root):
 
 
 def attach(bundle,root):
+    if (Path(root)/'compatibility_inputs.json').exists():
+        from .compatibility import attach as attach_compatible
+        return attach_compatible(bundle,root)
     root=Path(root).resolve();p=root/'verified_manifest.json';seal=st.read_json(root/'verified_manifest.seal.json')
     if seal!=dict(sha256=st.sha(p),recovery_inputs_sha256=st.sha(root/'recovery_inputs.json')):raise ValueError('modified recovered support manifest')
     spec=st.read_json(root/'recovery_inputs.json');m=st.read_json(p)

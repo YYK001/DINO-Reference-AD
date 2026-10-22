@@ -106,17 +106,27 @@ def summarize(bundle,out):
     state=dict(identity=bundle.identity,status='all_requested_stages_complete' if complete else 'partial_evidence',all_metrics_complete=len(complete_domains)==3 and all(r['AUPRO'] is not None for r in metrics),
         domains_CPU_complete=complete_domains,images=sum(len(prediction.selected(bundle,d)) for d in complete_domains),pending=pending,
         numerical_failed_checks=sum(str(v['verified']).lower() not in ('true','1') for v in checks),model_inference=False,feature_extraction=False)
+    recovered=bundle.frozen.get('recovered_supports',{}).get('manifest',{})
+    if recovered.get('status')=='historical_map_score_compatible':
+        state.update(recovery_policy=recovered['policy']['revision'],historical_strict_distance_compatible=recovered['strict_distance_compatible'],
+            historical_strict_distance_failed_checks=sum(r['strict_failed_image_layer_checks'] for r in recovered['domain_summaries']),
+            numerical_failed_checks_scope='formal frozen predictions/maps/scores; historical recovery distance drift reported separately')
     st.write_json(out/'status.json',state);report(out,metrics,comparisons,transfer_summary,state)
     if 'recovered_supports' in bundle.frozen:
         recovery=bundle.frozen['recovered_supports']['manifest']
         with (out/'objective_report.md').open('a',encoding='utf-8') as f:
+            note=('采用显式historical-maps-v1兼容政策：各层对等权融合的MAD响应误差≤1e-4、融合图最大差≤1e-4、CH1/CURRENT分数差≤1e-5。'
+                  f'原距离严格检查是否全部通过：{recovery["strict_distance_compatible"]}；失败保留，不能写成严格复现。'
+                  '兼容政策只控制恢复数据接入，不更改几何或检测参数。'
+                  if recovery.get('status')=='historical_map_score_compatible' else
+                  '全部926张、四层原缓存的SEGMENT距离与端点长度在原atol=1e-7/rtol=1e-6下通过兼容核查；')
             f.write('\n## 支持恢复来源与复现边界\n\n'
                 '本次使用显式重新提取并独立封存的原24张正常支持特征，不把新NPZ冒充原历史字节文件。'
                 f'恢复身份：`{recovery["recovery_identity"]}`。'
-                '全部926张、四层原缓存的SEGMENT距离与端点长度在原atol=1e-7/rtol=1e-6下通过兼容核查；'
+                +note+
                 '原历史特征SHA保留，新文件SHA另记。本次查询仍使用历史距离与索引。'
                 '由于原完整Q未保存，不能证明新支持银行对原Q的八支持Top1检索逐元素完全等价；'
-                '本轮结果应在这一明确复现边界下解释。详见input_manifest.json中的recovered_supports。\n')
+                '也未证明相对已丢失原特征的WITNESS离散门控完全不变。本轮结果应在这一复现边界下解释。详见input_manifest.json中的recovered_supports。\n')
     st.write_json(out/'delivery_manifest.json',dict(identity=bundle.identity,files={f:st.sha(out/f) for f in [*tables,'status.json','objective_report.md']}))
     return state
 

@@ -53,6 +53,15 @@ def audit_image(bundle,sample,banks):
     return checks,scores
 
 
+def load_domain_banks(bundle,locations,domain):
+    banks={l:{} for l in LAYERS}
+    for row in bundle.original_expected[domain]:
+        with np.load(locations[domain,row['support_index']],allow_pickle=False) as z:arrays={k:z[k] for k in z.files}
+        rec.validate_arrays(arrays,row)
+        for l in LAYERS:banks[l][row['support_index']]=arrays[f'layer_{l}']
+    return banks
+
+
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--run-root',required=True,type=Path)
     p.add_argument('--data',required=True,type=Path);p.add_argument('--cpu-workers',type=int,default=8)
@@ -68,12 +77,8 @@ def main(argv=None):
         original=rec.original_proof(bundle),audit_source_sha256=st.sha(Path(__file__)),domains=a.domains,GT_used=False,model_inference=False))
     errors=[];all_checks=[];all_scores=[]
     for d in dict.fromkeys(a.domains):
-        banks={l:{} for l in LAYERS}
         # Hold one domain (about2.13GiB), read each complete NPZ once. No Q.
-        for row in bundle.original_expected[d]:
-            with np.load(locations[d,row['support_index']],allow_pickle=False) as z:arrays={k:z[k] for k in z.files}
-            rec.validate_arrays(arrays,row)
-            for l in LAYERS:banks[l][row['support_index']]=arrays[f'layer_{l}']
+        banks=load_domain_banks(bundle,locations,d)
         samples=[s for s in bundle.samples if s['domain']==d]
         def work(sample):
             try:return audit_image(bundle,sample,banks),None
@@ -85,7 +90,7 @@ def main(argv=None):
                     checks,scores=result;all_checks.extend(checks);all_scores.append(scores)
                 if (i+1)%25==0 or i+1==len(samples):print(f'[CPU recovery drift] {d} {i+1}/{len(samples)} errors={len(errors)}',flush=True)
         st.write_csv(out/(d+'_geometry.csv'),[r for r in all_checks if r['domain']==d])
-        st.write_csv(out/(d+'_scores.csv'),[r for r in all_scores if r['domain']==d]);del banks,arrays
+        st.write_csv(out/(d+'_scores.csv'),[r for r in all_scores if r['domain']==d]);del banks
     groups=defaultdict(list)
     for row in all_checks:groups[row['domain'],row['layer'],row['check_kind']].append(row)
     summary=[]

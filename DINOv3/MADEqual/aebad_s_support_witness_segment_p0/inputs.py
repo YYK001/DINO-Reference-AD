@@ -151,7 +151,11 @@ def discover(roots):
 
 def locate(bundle,roots,domains,scan=False):
     expected=[r for d in domains for r in bundle.expected[d]];locations={};available=[];mismatches=[]
-    if scan:candidates,archives=discover(roots)
+    if hasattr(bundle,'recovered_locations'):
+        # A certificate can reference an immutable extraction directory outside
+        # the new run; do not require duplicate feature files under certificate/.
+        candidates=list(bundle.recovered_locations.values());archives=[]
+    elif scan:candidates,archives=discover(roots)
     else:
         candidates=[];archives=[]
         for root in map(Path,roots):

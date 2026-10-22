@@ -66,3 +66,15 @@ SQLite每条唯一连接包含端点行号、有限第三图候选ID、全部合
 新增`portable.py`按742个必要文件导出3.47GiB冻结CPU输入包，保留所有原相对布局、元数据和字节哈希，不含Source bank/checkpoint/图像/支持。流式打包时同步计算一次SHA；restore禁止路径越界、重复成员及不同内容覆盖。输入包不上传GitHub。
 
 新增`autodl.py`是用户手动启动的完整流程，支持明确单/双GPU，30秒心跳、分阶段日志与退出码、成功或失败review打包、同目录续跑；仅完整指标/LOO/数值状态和打包均成功才可触发显式`--shutdown-on-success`。无自动SSH、无安装依赖、无容量估算准入、无失败后关机。新增14项轻量CPU测试通过；GPU提取、CUDA支持检索、多卡调度和真实评价仍未执行。
+
+## 2026-10-23：显式历史地图/评分兼容政策
+
+此前严格恢复要求endpoint_length和SEGMENT逐点均满足1e-7/1e-6，首个失败层即停止。用户真实CPU审计表明background全层完全一致，两个Kaggle来源域在全部层存在较小差异：融合图最大4.57e-5/1.70e-5，CH1/CURRENT最大均<2.4e-6；view有2张峰值位置变化。不能称定位完全一致，也未验证原Top1或WITNESS门控不变。
+
+新增compatibility.py，仅显式historical-maps-v1使用。原strict仍默认，不改原geometry_layer/DIST_ATOL/DIST_RTOL。新数据接入要求完整地图最大差<=1e-4 Source MAD响应，各层对原四层等权融合的最大贡献差<=1e-4，CH1/CURRENT变化<=原1e-5；地图数值限值属于新工程政策，不冒充原历史严格检查。支持身份/顺序、QUERY/PRECISION/checkpoint/host config、原NPZ/record SHA继续严格验证。
+
+旧提取目录只读；新的运行目录生成独立compatibility_inputs、逐域CPU审计+seal、兼容manifest+seal，并纳入新的运行身份。旧未封存审计不能直接认可，重新执行CPU几何/原地图/评分，未读取GT或查询标签。原几何有数学错误、任一图/分数/分层贡献超限、身份变更或文件/封存异常仍失败。兼容模式不加载模型，不提取支持或query，不构建Source，不拟合MAD。
+
+原逐点距离失败保留在审计、manifest、正式status与报告中，不用numerical_failed_checks=0误称历史全通过；此字段范围明确为正式冻结预测/地图/分数核查。原历史定位图和指标继续按原缓存SHA核查后复用；恢复几何只用于兼容审计，正式U/S仍读取原距离。方法alpha/rho/k5、均匀缩距、Source MAD、评价器没有变化。
+
+新增10项CPU合成测试覆盖真实小型原geometry与地图/分数接入、旧文件不改、不复制银行的外部来源加载、严格失败继续保留、分层抵消保护、图/分数超限/非有限/数量/单位错误、文件或seal篡改、旧未封存中间结果拒绝、协议不符、默认strict及复用模式不进入提取阶段。GPU启动用替身隔离，不代表真实支持检索或全域实验通过。
