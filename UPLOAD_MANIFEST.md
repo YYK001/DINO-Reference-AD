@@ -526,3 +526,11 @@ DINOv3/MADEqual/aebad_s_support_witness_segment_p0/supports.py
 DINOv3/tests/test_aebad_s_support_witness_recovery.py
 DINOv3/tests/test_aebad_s_support_witness_segment.py
 ```
+
+## WITNESS数值误差审计追加
+
+```text
+DINOv3/MADEqual/aebad_s_witness_recovery_audit.py
+DINOv3/tests/test_aebad_s_witness_recovery_audit.py
+```
+只含独立CPU审计与测试，不含服务器结果或特征。

@@ -92,3 +92,13 @@ AutoDL 后续统一用上述独立 clone / `git pull --ff-only` 更新代码，�
 [运行说明](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/implementation_audit.md)。冻结三域原K8与926张名单，比较UNION、SEGMENT、第三图佐证连接与等量均匀缩距。独立支持间k5、整图留一、缓存预测、CPU精确评价与6项原CUDA AUPRO，不修改旧分支列表。
 
 显式`recover-support`只恢复丢失的24张原正常支持特征；`verify-support`核对所有原缓存SEGMENT和端点长度，再允许带新来源身份的支持接入。历史特征SHA保持不变，不能声称新银行与缺失Q的原检索逐位相同。`portable`传输冻结父输入，`autodl`按用户指令串联完整流程，明确单/双卡、30秒心跳、中断续跑及成功后可选关机；失败保留现场。代码、CPU合成测试及输入可迁移性已验证，真实模型/CUDA/完整实验仍须用户显式启动。冻结资产和本机验证日志不在GitHub。
+
+### 支持恢复的跨环境误差审计
+
+若WITNESS恢复在旧缓存兼容检查停止，可显式运行独立CPU审计：
+
+```bash
+python -B -u -m DINOv3.MADEqual.aebad_s_witness_recovery_audit --run-root /actual/witness_run --data /actual/AeBAD_S --cpu-workers 8
+```
+
+默认完整illumination/view两域629张、四层，不重提特征、不读取GT、不调用Torch或GPU。只观察原始距离、端点长度、Source MAD尺度误差、原定位图及CH1/CURRENT分数变化；严格失败继续保留，不把审计完成写成实验通过。相同旧缓存的地图SHA和分数仍严格复核。结果写到独立drift_audit目录，冻结WITNESS源码和原恢复seal保持不变。六项合成CPU测试通过，不代表真实跨环境审计已通过。
