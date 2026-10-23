@@ -189,20 +189,25 @@ def _scan_torch(query,nodes,edges,masks,union,device,query_chunk,edge_chunk,refe
                     np.finfo(np.float64).eps*(aa.abs()+bb.abs()+cc))
                 if (square < -error).any().item():raise FloatingPointError('segment square below FP64 interval')
                 needed=torch.zeros(square.shape,dtype=torch.bool,device=dev)
-                for k in range(len(masks)):
-                    if not masks[k,e:e+len(es)].any():continue
-                    upper=torch.minimum(best[k],torch.where(active[k],square+error,torch.inf).min(1).values)
-                    needed|=active[k]&(square-error<=upper[:,None])
+                # Batch the 45 normal-LOO configurations, bounded to eight at
+                # a time. Same per-mask minima, fewer tiny kernel launches.
+                for first in range(0,len(masks),8):
+                    last=min(first+8,len(masks));group=active[first:last]
+                    upper=torch.minimum(best[first:last],torch.where(group[:,None,:],
+                        (square+error)[None],torch.inf).min(2).values)
+                    needed|=(group[:,None,:]&((square-error)[None]<=upper[:,:,None])).any(0)
                 exact=torch.full_like(square,torch.inf);coords=torch.nonzero(needed)
                 for z in range(0,len(coords),256):
                     qi,ei=coords[z:z+256].unbind(1);u=x[es[ei,0]];direction=x[es[ei,1]]-u
                     delta=q[qi]-u;fraction=((delta*direction).sum(-1)/(direction*direction).sum(-1)).clamp(0,1)
                     residual=delta-fraction[:,None]*direction;exact[qi,ei]=(residual*residual).sum(-1)
                 backend.direct_pairs+=len(coords)
-                for k in range(len(masks)):
-                    if not masks[k,e:e+len(es)].any():continue
-                    distance,idx=torch.where(active[k],exact,torch.inf).min(1);improve=distance<best[k]
-                    best[k,improve]=distance[improve];chosen[k,improve]=e+idx[improve]
+                for first in range(0,len(masks),8):
+                    last=min(first+8,len(masks));group=active[first:last]
+                    distance,idx=torch.where(group[:,None,:],exact[None],torch.inf).min(2)
+                    improve=distance<best[first:last]
+                    best[first:last]=torch.where(improve,distance,best[first:last])
+                    chosen[first:last]=torch.where(improve,e+idx,chosen[first:last])
             result[:,start:stop]=np.minimum(result[:,start:stop],backend.numpy((best.sqrt()/1280).float()))
             winners[:,start:stop]=backend.numpy(chosen)
             if progress:progress(stop,len(query))

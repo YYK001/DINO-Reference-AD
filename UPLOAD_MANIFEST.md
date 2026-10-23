@@ -605,3 +605,16 @@ DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/runtime.py
 DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/selection.py
 DINOv3/tests/test_aebad_s_fixed_target_graph.py
 ```
+
+## 固定Target图GPU执行优化（2026-10-23）
+
+更新下列6个工具文件，另更新README和本清单。未修改检测定义、参数候选或历史输出；没有上传数据、权重和缓存。
+
+```text
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/graph.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/numerics.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/README.md
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/runtime.py
+DINOv3/tests/test_aebad_s_fixed_target_graph.py
+```

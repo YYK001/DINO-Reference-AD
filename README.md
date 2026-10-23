@@ -122,4 +122,6 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 
 [运行说明](DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/implementation_audit.md)。独立fresh入口保留原Source/两级MAD、seed42三域926张，正常整图留一选择固定互近邻图与完整第三方佐证，比较七分支及两种缩距控制。显式支持复用当前机器已封存fresh资产，不依赖旧AutoDL缓存；单卡、最多8个CPU worker、stream/disk查询缓存、tmux和分阶段续跑，无容量准入门槛或自动关机。
 
-34项新专项与42项原实现回归共76项本地CPU测试通过；真实DINOv3提取、CUDA、真实规模图与ADEval GPU尚未验证。测试含骨干/银行替身，不代表正式实验成功。额外seed43/44须显式使用878张共同名单，不与926主表混用。
+38项新专项与42项原实现回归共80项本地CPU测试通过；真实DINOv3提取、CUDA、真实规模图与ADEval GPU尚未验证。测试含骨干/银行替身，不代表正式实验成功。额外seed43/44须显式使用878张共同名单，不与926主表混用。
+
+优化版将完整佐证的筛选、计数和直方图保留在GPU，LOO配置分批归约，同层Top100表九折只读一次；公式、FP64和完整搜索不变。新增逐折边速/耗时日志，CUDA加速倍数尚未实测。更新后使用新目录重跑，命令见工具README，不迁移旧图缓存。

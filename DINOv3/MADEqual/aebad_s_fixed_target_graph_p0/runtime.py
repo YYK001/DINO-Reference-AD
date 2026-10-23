@@ -1,5 +1,6 @@
 """Lazy original host and fresh stages. No real computation at import time."""
 import gc
+import time
 from pathlib import Path
 from types import FunctionType
 import numpy as np
@@ -170,10 +171,18 @@ def prepare_graphs(a):
                         idx,dist=topk(banks[aa],banks[bb],min(100,len(banks[bb])),device=a.device,
                             query_chunk=a.query_chunk,reference_chunk=a.reference_chunk)
                         st.seal(p,identity,dict(indices=idx,distances=dist),m,compressed=False)
+            # One validated load for this domain/layer. Fold-specific global
+            # neighbors/scales still recompute, but immutable pair tables need
+            # not be reread and rehashed from HDD nine times.
+            all_pairs,_=read_pairs(a,d,l,list(banks))
+            pair_hashes={(u,v):st.read_json(pair_path(a,d,l,u,v).with_suffix('.json'))['sha256']
+                for u in banks for v in banks if u!=v}
             for h in sorted(getattr(a,'heldouts',range(9)),key=lambda h:(h==0,h)):
                 path=graph_path(a,d,l,h);retained=[c for c in banks if c!=h]
                 # Whole-image exclusion changes Top-k, scales and quantiles.
-                fold={c:banks[c] for c in retained};pairs,pair_identity=read_pairs(a,d,l,retained)
+                fold={c:banks[c] for c in retained}
+                pairs={(u,v):all_pairs[u,v] for u in retained for v in retained if u!=v}
+                pair_identity=st.digest([pair_hashes[u,v] for u in retained for v in retained if u!=v])
                 if st.restore(path,identity) is None:
                     pool=graph.mutual_pool(fold,pairs);limits=graph.length_limits(pool)
                     selected=np.zeros(len(pool['edges']),bool)
@@ -189,12 +198,20 @@ def prepare_graphs(a):
                         note='counts/bytes, not measured seconds; exhaustive, no resource admission gate')
                     st.write_json(path.with_name(path.stem+'_estimate.json'),estimate)
                     print('[graph cost] '+__import__('json').dumps(estimate),flush=True)
+                    started=time.perf_counter();last_log=started
+                    def progress(done,total):
+                        nonlocal last_log
+                        now=time.perf_counter()
+                        if done==total or done==min(total,a.witness_edge_chunk) or now-last_log>=30:
+                            print(f'[graph witness full search] {d}/L{l} fold={h} {done}/{total} '
+                                f'elapsed={now-started:.1f}s edges_per_second={done/max(now-started,1e-9):.2f}',flush=True)
+                            last_log=now
                     witness=graph.witness_pool(fold,pool,device=a.device,edge_chunk=a.witness_edge_chunk,
-                        reference_chunk=a.reference_chunk,
-                        progress=lambda n,total:print(f'[graph witness full search] {d}/L{l} fold={h} {n}/{total}',flush=True)
-                            if n==total or n%(a.witness_edge_chunk*100)==0 else None)
+                        reference_chunk=a.reference_chunk,progress=progress)
+                    seconds=time.perf_counter()-started
+                    print(f'[graph witness complete] {d}/L{l} fold={h} edges={n} seconds={seconds:.3f}',flush=True)
                     meta=dict(domain=d,layer=l,heldout=h,retained=retained,pair_identity=pair_identity,
-                        candidate_edges=len(pool['edges']),nodes=len(pool['scales']),
+                        candidate_edges=len(pool['edges']),nodes=len(pool['scales']),witness_seconds=seconds,
                         limits=[dict(k=k,q=q,limit=value) for (k,q),value in limits.items()],
                         zero_length_removed=pool.pop('zero_length_removed'),unavailable_scales=pool.pop('unavailable_scales'))
                     st.seal(path,identity,{**pool,**witness},meta,compressed=False)

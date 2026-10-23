@@ -73,6 +73,9 @@ def witness_pool(banks,pool,*,device='cpu',edge_chunk=64,reference_chunk=1024,pr
     against conservative intervals and direct vectors near alpha/eta boundaries
     and wherever the representative minimum could be numerically ambiguous.
     """
+    if device!='cpu':
+        return _witness_torch(banks,pool,device=device,edge_chunk=edge_chunk,
+            reference_chunk=reference_chunk,progress=progress)
     nodes,off,support,_=layout(banks);edges=pool['edges'];n=len(edges)
     backend=Backend(device);x=backend.array(nodes)
     result=dict(eta=np.full(n,np.inf),witness_support=np.full(n,-1,np.int32),
@@ -144,6 +147,108 @@ def witness_pool(banks,pool,*,device='cpu',edge_chunk=64,reference_chunk=1024,pr
         if progress: progress(stop,n)
     result['direct_pairs']=np.asarray(backend.direct_pairs,np.int64)
     return result
+
+
+def _witness_torch(banks,pool,*,device,edge_chunk,reference_chunk,progress=None):
+    """Same exhaustive FP64 search; filtering and statistics remain on device.
+
+    No per-block NumPy arrays or CPU threshold/histogram loops. Only the final
+    per-edge summary is copied to the host. Dynamic direct-refinement indices
+    still require Torch synchronization; no claim of an asynchronous kernel.
+    """
+    nodes,off,support,_=layout(banks);edges=pool['edges'];n=len(edges)
+    backend=Backend(device);torch=backend.torch;dev=backend.dev
+    if min(edge_chunk,reference_chunk)<1:raise ValueError('positive witness blocks required')
+    with torch.inference_mode():
+        x=backend.array(nodes);scales=backend.array(pool['scales'])
+        thresholds=backend.array(ETAS)
+        # Use exactly the reference Python FP64 bin boundaries. bucketize with
+        # right=True assigns an internal boundary to the bin on its right.
+        boundaries=backend.array([.2+b*.1 for b in range(1,6)])
+        result=dict(eta=torch.full((n,),torch.inf,dtype=torch.float64,device=dev),
+            witness_support=torch.full((n,),-1,dtype=torch.int32,device=dev),
+            witness_row=torch.full((n,),-1,dtype=torch.int64,device=dev),
+            witness_alpha=torch.full((n,),torch.nan,dtype=torch.float64,device=dev),
+            witness_h=torch.full((n,),torch.nan,dtype=torch.float64,device=dev),
+            witness_scale=torch.full((n,),torch.nan,dtype=torch.float64,device=dev),
+            source_counts=torch.zeros((n,len(ETAS)),dtype=torch.int16,device=dev),
+            alpha_histogram=torch.zeros((n,len(ETAS),6),dtype=torch.int32,device=dev),
+            valid_internal_points=torch.zeros(n,dtype=torch.int64,device=dev),
+            outside_interval=torch.zeros(n,dtype=torch.int64,device=dev),
+            invalid_scale_points=torch.zeros(n,dtype=torch.int64,device=dev))
+        for start in range(0,n,edge_chunk):
+            stop=min(start+edge_chunk,n);es=edges[start:stop]
+            for c in sorted(banks):
+                loc=np.flatnonzero((support[es[:,0]]!=c)&(support[es[:,1]]!=c))
+                if not len(loc):continue
+                # This is small, deterministic graph metadata, never computed
+                # from a query or GT and never copied back out of the hot loop.
+                rows=torch.as_tensor(start+loc,dtype=torch.int64,device=dev)
+                ends=torch.as_tensor(es[loc],dtype=torch.int64,device=dev)
+                u=x[ends[:,0]];direction=x[ends[:,1]]-u
+                cc=(direction*direction).sum(-1);un=(u*u).sum(-1)
+                du=(direction*u).sum(-1)
+                source_pass=torch.zeros((len(loc),len(ETAS)),dtype=torch.bool,device=dev)
+                for r in range(0,len(banks[c]),reference_chunk):
+                    w=x[off[c]+r:off[c]+min(r+reference_chunk,len(banks[c]))]
+                    scale=scales[off[c]+r:off[c]+r+len(w)]
+                    usable=torch.isfinite(scale)&(scale>0)
+                    divisor=torch.where(usable,scale,1.)[None,:]
+                    a,aerr=backend.squared(u,w)
+                    t=direction@w.T-du[:,None]
+                    aa=t/cc[:,None];hh=a-t*t/cc[:,None]
+                    wn=(w*w).sum(-1)
+                    terr=32*(nodes.shape[1]+8)*np.finfo(np.float64).eps*(
+                        (cc[:,None]*wn[None,:]).sqrt()+((cc*un).sqrt())[:,None])
+                    err=aerr+(2*t.abs()+terr)*terr/cc[:,None]
+                    ae=terr/cc[:,None]
+                    if (hh < -err).any().item():raise FloatingPointError('witness residual square below FP64 bound')
+                    low=(hh-err).clamp_min(0).sqrt()/divisor
+                    high=(hh+err).clamp_min(0).sqrt()/divisor
+                    ambiguous=(hh<=err)|((aa-.2).abs()<=ae)|((aa-.8).abs()<=ae)
+                    crosses=(low[:,:,None]<=thresholds)&(high[:,:,None]>=thresholds)
+                    ambiguous|=crosses.any(-1)&usable
+                    can_internal=(aa+ae>=.2)&(aa-ae<=.8)&usable
+                    upper=torch.where(can_internal,high,torch.inf).min(1).values
+                    ambiguous|=can_internal&(low<=upper[:,None])
+                    coords=torch.nonzero(ambiguous)
+                    for z in range(0,len(coords),256):
+                        ii,jj=coords[z:z+256].unbind(1)
+                        delta=w[jj]-u[ii];d=direction[ii]
+                        al=(delta*d).sum(-1)/cc[ii]
+                        residual=delta-al[:,None]*d
+                        aa[ii,jj]=al;hh[ii,jj]=(residual*residual).sum(-1)
+                    backend.direct_pairs+=len(coords)
+                    if (hh<0).any().item():raise FloatingPointError('negative witness residual after direct refinement')
+                    inside=(aa>=.2)&(aa<=.8);valid=inside&usable
+                    result['outside_interval'][rows]+=(~inside).sum(1)
+                    result['invalid_scale_points'][rows]+=(inside&~usable).sum(1)
+                    result['valid_internal_points'][rows]+=valid.sum(1)
+                    ratio=hh.sqrt()/divisor
+                    passed=valid[:,:,None]&(ratio[:,:,None]<=thresholds)
+                    source_pass|=passed.any(1)
+                    # Four threshold histograms in one scatter; no 24 per-bin
+                    # CPU reductions and no feature-dependent retries.
+                    bins=torch.bucketize(aa.contiguous(),boundaries,right=True)
+                    histogram=torch.zeros((len(loc),len(ETAS),6),dtype=torch.int32,device=dev)
+                    histogram.scatter_add_(2,bins[:,None,:].expand(-1,len(ETAS),-1),
+                        passed.permute(0,2,1).to(torch.int32))
+                    result['alpha_histogram'][rows]+=histogram
+                    value=torch.where(valid,ratio,torch.inf);best,col=value.min(1)
+                    # First point wins ties; source and row traversal unchanged.
+                    take=best<result['eta'][rows]
+                    updates=dict(eta=best,witness_support=c,witness_row=r+col,
+                        witness_alpha=aa.gather(1,col[:,None]).ravel(),
+                        witness_h=hh.gather(1,col[:,None]).ravel().sqrt(),witness_scale=scale[col])
+                    # Fixed-size where avoids six dynamic boolean compactions
+                    # (and their CUDA shape synchronizations) for every block.
+                    for key,value in updates.items():
+                        result[key][rows]=torch.where(take,value,result[key][rows])
+                result['source_counts'][rows]+=source_pass.to(torch.int16)
+            if progress:progress(stop,n)
+        result={k:v.cpu().numpy() for k,v in result.items()}
+        result['direct_pairs']=np.asarray(backend.direct_pairs,np.int64)
+        return result
 
 
 def summary(pool,mask,scale,*,domain,layer,fold,config):

@@ -58,6 +58,10 @@
 
 Source构库/校准一轮一次，支持RGB一轮一次，正式query一轮一次前向后处理所有分支。支持图对同一个距离块同时更新两个方向的Top100（每层28对计算，保存56张有向表），并在k、阈值、折之间复用；不能复用含留出图的全局排序、尺度和边长阈值。原宿主FP32离散检索另算并缓存，不用图的FP64表偷换原评分后端。每折整图检索一次，同时归约45配置，不分别提特征或重复做45次端点距离。
 
+GPU执行优化：完整佐证的alpha/eta判定、四个阈值的来源计数、alpha直方图及代表点更新均留在设备上，最后只回传11组逐边摘要，不逐块回传点×边数组。直方图使用整型scatter，代表并列顺序不变；临界值仍执行原FP64直接向量复核。仍有数值检查和动态复核索引所需同步，不声称完全异步。正常LOO的45配置每次最多8个批量归约，限制临时内存并减少小kernel启动。每域/层Top100表只验证加载一次，九折共享该只读表；七图全局关系与尺度照常重算，额外常驻RAM约1.2GiB（13924点/图）。
+
+佐证进度新增`elapsed`与`edges_per_second`，第一块完成后及之后约30秒报告一次；每折结束记录真实`witness_seconds`。完整点—边比较数量不因这些优化减少，实际CUDA加速倍数尚未测量。新运行可显式使用`--witness-edge-chunk 512`加大执行块；这只是分块参数，不是方法候选或精度调整，也不承诺它在所有GPU上最优。
+
 全新运行仍有约120.8GiB Source临时候选（构库完成后原builder释放）。13924patch/图假设下，三域四层支持图对Top100表约14GiB；持久图本体约198B/候选边另加节点字段，稠密互近邻上界可达百GiB量级。完整Q的`disk`模式约246GiB（926×4×13924×1280×4）；`stream`为0持久Q，但仍保存足够重评的距离/胜边数组。两者都需要预测、图、支持和评价空间，不能只按Q计算总磁盘。
 
 `cost_estimate.json`在支持提取后按实际网格输出表大小和矩阵块字节；每图折`fold_*_estimate.json`在完整佐证计算前输出实际候选边数、边×第三方点/查询点组合数、图字节估算。**完整第三方搜索、96个LOO图检索可能显著超过旧WITNESS的约3小时；当前没有真实耗时测量，不能按旧实验外推。** 估算不阻止运行、不触发近似算法。
@@ -68,6 +72,7 @@ Source构库/校准一轮一次，支持RGB一轮一次，正式query一轮一�
 - `--query-mode disk`：保存原始FP32四层Q、positions、几何和图像身份；下游失败后可直接续算，不再前向。相同模式/配置显式复用的新工具运行，还可在seed43/44中复用相同query的Q。
 - `--reuse-fresh-run PATH`是可选的**当前机器显式资产来源**，支持已完成旧WITNESS fresh运行或本工具seed42运行。核对Source图像、代码、配置、软件身份和原封存记录后，在新输出中链接原Source bank、66校准缓存、同身份支持特征；Source MAD由同66缓存重新核对拟合，无新增模型前向。原文件和记录不改名、不覆盖。来源路径记入frozen_assets；链接依赖来源文件继续存在。
 - 旧WITNESS没有完整Q，不能从其Top1距离恢复Q。复用其Source/支持可省掉构库与支持提取，但926张正式query仍需一次新前向。旧AutoDL任何资产都不是前提。
+- 更新执行代码后必须用**新的run/cache目录**。先停止旧作业，再同步；不要在旧run里修改`run_config.json`或哈希来绕过版本身份。本轮按用户要求重跑，不实现旧Top100/旧图的跨版本迁移。原有Source/校准/支持复用仍可显式选择；不传`--reuse-fresh-run`则完整fresh。
 
 ## 手动运行示例（部署本模块后）
 
@@ -93,7 +98,7 @@ common=(
   --evaluation-scratch "$work/tmp/$(basename "$run")"
   --query-mode stream --seed 42 --evaluation-scope primary
   --device cuda:0 --cpu-workers 8
-  --query-chunk 128 --reference-chunk 2048 --edge-chunk 2048 --witness-edge-chunk 64
+  --query-chunk 128 --reference-chunk 2048 --edge-chunk 2048 --witness-edge-chunk 512
 )
 cd "$repo" || exit 1
 module=DINOv3.MADEqual.aebad_s_fixed_target_graph_p0.runner

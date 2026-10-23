@@ -274,6 +274,16 @@ class TorchCPU(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):cls.torch.set_num_threads(cls.old_threads)
 
+    def test_45_device_configurations_batched_without_changing_winners(self):
+        rng=np.random.default_rng(92);nodes=rng.normal(size=(11,17)).astype(np.float32)
+        q=rng.normal(size=(7,17)).astype(np.float32)
+        edges=np.array([(i,j) for i in range(11) for j in range(i+1,11)])
+        masks=rng.random((45,len(edges)))>.5;masks[3]=False
+        union=np.full(len(q),1,np.float32)
+        reference=numerics.scan_segments(q,nodes,edges,masks,union,query_chunk=3,edge_chunk=7,reference_chunk=5)
+        actual=numerics.scan_segments(q,nodes,edges,masks,union,device='torch:cpu',query_chunk=2,edge_chunk=9,reference_chunk=4)
+        np.testing.assert_array_equal(actual[0],reference[0]);np.testing.assert_array_equal(actual[1],reference[1])
+
     def test_prepared_lengths_are_blocked_without_all_edge_directions(self):
         rng=np.random.default_rng(51);nodes=rng.normal(size=(10,1280)).astype(np.float32)
         edges=np.asarray([(i,j) for i in range(10) for j in range(i+1,10)])
@@ -312,6 +322,42 @@ class TorchCPU(unittest.TestCase):
         two=graph.witness_pool(b,pool,device='torch:cpu',edge_chunk=9,reference_chunk=4)
         for k in ('eta','witness_support','witness_row','source_counts','alpha_histogram'):
             np.testing.assert_allclose(one[k],two[k],atol=1e-12)
+
+    def test_witness_device_all_fields_boundaries_ties_invalid_scales_and_blocks(self):
+        b={1:np.array([[0.,0.]],np.float32),2:np.array([[4.,0.]],np.float32),
+            3:np.array([[4*a,h] for a in (.1,.2,.3,.4,.5,.6,.7,.8,.9)
+                for h in (.25,.5,.75,1.,1.1)],np.float32),
+            4:np.array([[2.,.25],[2.,.25]],np.float32)}
+        nodes,off,*_=graph.layout(b)
+        pool=dict(edges=np.array([[off[1],off[2]]]),scales=np.ones(len(nodes)))
+        pool['scales'][off[3]+4]=0.;pool['scales'][off[3]+12]=np.nan
+        expected=graph.witness_pool(b,pool,edge_chunk=1,reference_chunk=3)
+        actual=graph.witness_pool(b,pool,device='torch:cpu',edge_chunk=7,reference_chunk=8)
+        for key in expected:
+            if key!='direct_pairs':np.testing.assert_allclose(actual[key],expected[key],atol=1e-12,err_msg=key)
+        self.assertEqual(actual['witness_support'][0],3)
+        self.assertTrue((actual['source_counts'][0]==2).all())
+
+    def test_witness_device_cancellation_matches_direct_geometry(self):
+        b={1:np.array([[1e5,1e5]],np.float32),2:np.array([[1e5+4,1e5]],np.float32),
+            3:np.array([[1e5+2,1e5+.015625]],np.float32)}
+        nodes,off,*_=graph.layout(b)
+        pool=dict(edges=np.array([[off[1],off[2]]]),scales=np.ones(len(nodes)))
+        actual=graph.witness_pool(b,pool,device='torch:cpu',reference_chunk=1)
+        self.assertEqual(actual['witness_alpha'][0],.5)
+        self.assertEqual(actual['eta'][0],.015625)
+        self.assertGreater(actual['direct_pairs'],0)
+
+    def test_witness_device_copies_only_final_summaries_to_host(self):
+        rng=np.random.default_rng(71);b={i:rng.normal(size=(7,5)).astype(np.float32) for i in range(1,5)}
+        pool=graph.mutual_pool(b,tables(b,k=7))
+        copies=[];original=self.torch.Tensor.cpu
+        def copied(tensor,*args,**kwargs):
+            copies.append(tuple(tensor.shape));return original(tensor,*args,**kwargs)
+        with patch.object(self.torch.Tensor,'cpu',copied),patch.object(numerics.Backend,'numpy',side_effect=AssertionError('block sent to NumPy')):
+            actual=graph.witness_pool(b,pool,device='torch:cpu',edge_chunk=3,reference_chunk=2)
+        self.assertEqual(len(copies),11)
+        self.assertEqual(sorted(copies),sorted(value.shape for key,value in actual.items() if key!='direct_pairs'))
 
     def test_original_UNION_SEGMENT_paths_and_units(self):
         from DINOv3.MADEqual.aebad_s_fixed_target_graph_p0 import runtime
@@ -419,7 +465,10 @@ class Integration(unittest.TestCase):
                         st.seal(cache/'support_baseline'/d/f'{h:03d}.npz','fixture',dict(source=np.stack([s]*4),
                             target=np.stack([t]*4),indices=np.stack([idx]*4)),{})
                 with contextlib.redirect_stdout(io.StringIO()):
-                    runtime.prepare_graphs(a);runtime.support_loo(a);runtime.select(a)
+                    with patch.object(runtime,'read_pairs',wraps=runtime.read_pairs) as read_pairs:
+                        runtime.prepare_graphs(a)
+                        self.assertEqual(read_pairs.call_count,12)  # once/domain/layer, not per fold
+                    runtime.support_loo(a);runtime.select(a)
                     # Resume uses exactly the completed tables/LOO jobs.
                     with patch.object(runtime,'scan_segments',side_effect=AssertionError('LOO recomputed')):
                         runtime.support_loo(a)
