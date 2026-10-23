@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from . import inputs as ip,storage as st
 from .method import LAYERS,edge_key,witness,reduction,W,C
-from .neighbors import topk
+from .neighbors import topk,torch_topk
 from DINOv3.MADEqual.aebad_s_target_local_segment.geometry import geometry_layer
 
 
@@ -34,8 +34,15 @@ def prepare(bundle,out,locations,domain,layer,*,device='cpu',query_chunk=64,refe
     if (out/'neighbors'/domain/f'L{layer}'/'status.json').exists():
         # Check the PREVIOUS completed record before any resume can rewrite it.
         load_tables(bundle,out,domain,layer)
+        saved=st.read_json(out/'neighbors'/domain/f'L{layer}'/'status.json')
+        return dict(saved,new_pairs=0,seconds=time.perf_counter()-tick)
     banks=ip.load_layer(bundle.expected,locations,domain,layer);proof=[];computed=0
     if min(map(len,banks.values()))<5:raise ValueError('every other support must contain at least five original rows; no k reduction')
+    device_banks=None
+    if device!='cpu':
+        import torch
+        dev=torch.device(device);torch.cuda.set_device(dev)
+        device_banks={c:torch.as_tensor(bank,dtype=torch.float64,device=dev) for c,bank in banks.items()}
     for a in sorted(banks):
         for c in sorted(banks):
             if a==c:continue
@@ -46,7 +53,10 @@ def prepare(bundle,out,locations,domain,layer,*,device='cpu',query_chunk=64,refe
             if record is None:
                 def progress(done,total):
                     if done==total or done%(query_chunk*16)==0:print(f'[witness NN progress] {domain}/L{layer} {a}->{c} {done}/{total}',flush=True)
-                idx,d=topk(banks[a],banks[c],device=device,query_chunk=query_chunk,reference_chunk=reference_chunk,progress=progress)
+                if device_banks is None:
+                    idx,d=topk(banks[a],banks[c],device=device,query_chunk=query_chunk,reference_chunk=reference_chunk,progress=progress)
+                else:
+                    idx,d=torch_topk(device_banks[a],device_banks[c],device=device,query_chunk=query_chunk,reference_chunk=reference_chunk,progress=progress)
                 record=st.seal(path,bundle.identity,dict(indices=idx,distances=d),meta);computed+=1
             proof.append(dict(file=path.relative_to(out).as_posix(),sha256=record['sha256'],record_sha256=st.sha(path.with_suffix('.json'))))
             print(f'[witness neighbors] {domain}/L{layer} {a}->{c} verified',flush=True)
@@ -122,6 +132,24 @@ def candidate_gates(target,indices,relations,excluded=(),support_ids=None):
     order=np.argsort(ids,kind='stable');t,idx,ids=t[order],idx[order],ids[order]
     if len(t)<2:raise ValueError('at least two retained supports required')
     chosen=np.argsort(t,axis=0,kind='stable')[:2];gate=np.empty(t.shape[1],bool);proofs={};counts=Counter()
+    if hasattr(relations,'get_many'):
+        from .batch_witness import EDGE_REASONS
+        columns=np.arange(t.shape[1]);a,b=chosen
+        edges=np.stack((ids[a],idx[a,columns],ids[b],idx[b,columns]),axis=1)
+        masks,reasons,proof=relations.get_many(edges,excluded)
+        gate=masks!=0;unique_masks=proof['source_mask']
+        import hashlib
+        identity=hashlib.sha256()
+        identity.update(np.asarray(sorted(excluded),np.int64).tobytes())
+        for k in ('edges','source_mask','edge_reason'):identity.update(proof[k].tobytes())
+        return gate,dict(candidate_positions=len(gate),accepted_positions=int(gate.sum()),
+            unique_candidate_connections=len(unique_masks),unique_accepted_connections=int((unique_masks!=0).sum()),
+            effective_witness_sources=int(np.unpackbits(unique_masks[:,None],axis=1).sum()),
+            accepted_position_fraction=float(gate.mean()) if len(gate) else None,
+            unique_connection_acceptance_fraction=float((unique_masks!=0).mean()) if len(unique_masks) else None,
+            source_count_aggregation='sum over unique candidate connections, not independent query positions',
+            rejection_reasons={EDGE_REASONS[int(k)]:int(v) for k,v in zip(*np.unique(reasons,return_counts=True))},
+            connection_proof_identity=identity.hexdigest(),connection_proof_format='batched_array_v1')
     for k,(a,b) in enumerate(chosen.T):
         key=edge_key(ids[a],idx[a,k],ids[b],idx[b,k])
         if key not in proofs:proofs[key]=relations.get(key,excluded)
@@ -156,7 +184,7 @@ def loo_one(banks,indices,distances,heldout,relations):
     return rows,diag
 
 
-def support_loo(bundle,out,locations,domain,layer):
+def support_loo(bundle,out,locations,domain,layer,*,device='cpu',witness_batch=256):
     tick=time.perf_counter();out=st.initialize(out,bundle);banks=ip.load_layer(bundle.expected,locations,domain,layer)
     idx,dist,ni=load_tables(bundle,out,domain,layer);path=out/'support_loo'/domain/f'L{layer}.json'
     if path.exists():
@@ -164,14 +192,18 @@ def support_loo(bundle,out,locations,domain,layer):
         validate_loo(saved,bundle.identity,domain,layer,ni)
         return saved
     rows=[]
-    with Connections(out/'connections'/domain/f'L{layer}.sqlite',bundle.identity,banks,idx,ni) as relations:
+    from .batch_witness import Engine
+    with Engine(banks,idx,device=device,batch_size=witness_batch,
+                path=out/'connections_batched'/domain/f'L{layer}',identity=bundle.identity,neighbor_identity=ni) as relations:
         for h in sorted(banks):
             local,diag=loo_one(banks,idx,dist,h,relations)
             rows.extend(dict(domain=domain,layer=layer,**v) for v in local)
             print(f'[witness whole-image LOO] {domain}/L{layer} heldout={h}',flush=True)
         state=dict(identity=bundle.identity,status='target_only_support_LOO_complete',domain=domain,layer=layer,
             neighbors=ni,rows=rows,rows_sha256=st.digest(rows),seconds=time.perf_counter()-tick,
-            connection_seconds=relations.seconds,model_inference=False,feature_extraction=False)
+            connection_seconds=relations.seconds,scalar_boundary_fallback_edges=relations.scalar_fallback_edges,
+            connection_timing=relations.timing(),
+            witness_device=device,model_inference=False,feature_extraction=False)
     st.write_json(path,state);return state
 
 

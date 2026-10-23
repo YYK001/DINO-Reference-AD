@@ -21,7 +21,8 @@ def parser():
     p.add_argument('--checkpoint',required=True,type=Path)
     p.add_argument('--dinov3',type=Path,default=ip.parent.ROOT/'external_baselines/dinov3')
     p.add_argument('--devices',nargs='+',default=['cuda:0']);p.add_argument('--cpu-workers',type=int,default=8)
-    p.add_argument('--query-chunk',type=int,default=64);p.add_argument('--reference-chunk',type=int,default=1024)
+    p.add_argument('--query-chunk',type=int,default=256);p.add_argument('--reference-chunk',type=int,default=2048)
+    p.add_argument('--witness-batch',type=int,default=256)
     p.add_argument('--reuse-recovery',type=Path,help='reuse original sealed24 supports; no model or feature extraction')
     p.add_argument('--recovery-policy',choices=('strict','historical-maps-v1'),default='strict')
     p.add_argument('--shutdown-on-success',action='store_true')
@@ -75,7 +76,7 @@ def main(argv=None):
     a=parser().parse_args(argv)
     if len(a.devices) not in (1,2) or len(set(a.devices))!=len(a.devices) or any(not d.startswith('cuda:') for d in a.devices):
         raise ValueError('choose one/two distinct explicit CUDA devices')
-    if not 1<=a.cpu_workers<=8:raise ValueError('cpu-workers must be 1..8')
+    if a.cpu_workers<1 or min(a.query_chunk,a.reference_chunk,a.witness_batch)<1:raise ValueError('positive workers/chunks required')
     if (a.reuse_recovery is not None)!=(a.recovery_policy=='historical-maps-v1'):
         raise ValueError('explicit --reuse-recovery and --recovery-policy historical-maps-v1 must be used together')
     root=a.run_root.resolve()
@@ -87,7 +88,7 @@ def main(argv=None):
         if root==p or root in p.parents or p in root.parents:raise ValueError('run root overlaps original input: '+str(p))
     config=dict(code={p.name:st.sha(p) for p in Path(__file__).parent.glob('*.py')},
         data=str(a.data.resolve()),checkpoint=str(a.checkpoint.resolve()),dinov3=str(a.dinov3.resolve()),
-        devices=a.devices,cpu_workers=a.cpu_workers,query_chunk=a.query_chunk,reference_chunk=a.reference_chunk)
+        devices=a.devices,cpu_workers=a.cpu_workers,query_chunk=a.query_chunk,reference_chunk=a.reference_chunk,witness_batch=a.witness_batch)
     if a.reuse_recovery:config.update(reuse_recovery=str(a.reuse_recovery.resolve()),recovery_policy=a.recovery_policy)
     if root.exists():
         if not (root/'launcher_config.json').is_file() or st.read_json(root/'launcher_config.json')!=config:raise ValueError('run configuration differs; use fresh directory')
@@ -98,10 +99,11 @@ def main(argv=None):
     common=['--output-dir',str(output),'--data',str(a.data),'--recovered-supports',str(recovered)]
     recovery=['--checkpoint',str(a.checkpoint),'--dinov3',str(a.dinov3)]
     devices=['--devices',*a.devices];chunks=['--query-chunk',str(a.query_chunk),'--reference-chunk',str(a.reference_chunk)]
+    execution=devices+['--witness-batch',str(a.witness_batch),'--cpu-workers',str(a.cpu_workers)]
     stage_args=[('recover-support-preflight','recover-support',common+recovery+['--no-write']),
         ('recover-support','recover-support',common+recovery+devices),('verify-support','verify-support',common),
         ('preflight','preflight',common+['--no-write']),('prepare-support','prepare-support',common+devices+chunks),
-        ('support-loo','support-loo',common),('predict','predict',common),
+        ('support-loo','support-loo',common+execution),('predict','predict',common+execution),
         ('evaluate','evaluate',common+['--cpu-workers',str(a.cpu_workers)]),
         ('evaluate-aupro','evaluate-aupro',common+devices),('summarize','summarize',common)]
     if a.reuse_recovery:

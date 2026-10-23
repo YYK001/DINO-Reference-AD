@@ -1,6 +1,6 @@
 # 上传范围
 
-第二章代码及必要依赖：486 个文件，7.521 MiB。另含根 README、Git 排除/字节保持规则、本清单和 DINOv3 上游来源记录。
+仓库共523个版本管理文件，包含第二章代码、必要依赖、测试、运行说明和上游来源记录。追加内容见下方各节。
 
 不包含数据集、图片、权重、正式 memory/MAD、缓存、结果包、实验报告或本机盘点。
 少量非 AeBAD 目录文件为实际导入依赖；未整体纳入其独立实验。
@@ -550,3 +550,21 @@ DINOv3/MADEqual/aebad_s_witness_recovery_audit.py
 DINOv3/tests/test_aebad_s_witness_recovery_compatibility.py
 ```
 不包含支持特征、服务器审计或任何正式结果。
+
+## 2026-10-23 GPU批量佐证与多核执行
+
+```text
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/autodl.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/batch_witness.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/execution.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/execution_optimization.md
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/neighbors.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/prediction.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README.md
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/runner.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/supports.py
+DINOv3/tests/test_aebad_s_witness_batch.py
+```
+仅代码、测试和运行/检查说明；不含local_validation、数据、权重、支持特征、预测或正式结果。

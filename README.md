@@ -106,3 +106,9 @@ python -B -u -m DINOv3.MADEqual.aebad_s_witness_recovery_audit --run-root /actua
 ### 复用已封存支持的历史恢复兼容运行
 
 WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取目录> --recovery-policy historical-maps-v1`可在新的运行目录生成独立CPU兼容证书，复用24份特征而不重提。支持/图片/精度/配置及文件SHA严格核验，原缓存地图SHA与评分严格复核；恢复几何的各层等权MAD贡献和融合地图差<=1e-4，CH1/CURRENT差<=原1e-5。原逐点距离失败继续保留，不改写为严格复现，不更改检测公式或历史地图。完整复核后才执行正式支持检索/留一/预测/评价。详见[历史兼容政策与完整命令](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README.md)。本地72项CPU回归通过，真实兼容证书、GPU支持检索和新分支指标仍由用户执行。
+
+## WITNESS批量GPU执行与设备迁移
+
+[当前执行和检查清单](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/execution_optimization.md)：近邻检索、整图留一和预测支持显式单/双GPU，CPU冻结/评价支持指定worker；公式和评价不变。93项本地CPU测试通过，包含实际Torch CPU内核；真实CUDA、多卡计算与GPU加速比尚待验证。
+
+代码可在其他Linux/Windows设备克隆，AutoDL入口只是可选编排工具。数据、权重、恢复支持和冻结输入包不在GitHub中，需要单独迁移；在新设备准备环境并显式传入路径，历史正式结果不覆盖。

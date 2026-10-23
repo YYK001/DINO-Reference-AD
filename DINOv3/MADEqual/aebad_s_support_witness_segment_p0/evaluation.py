@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 from . import inputs as ip,storage as st,prediction
 from .method import BASES,NEW,BRANCHES,U,W,C
+from .execution import bounded_images
 from DINOv3.MADEqual.aebad_s_gap_soft_segment_p0 import evaluation as shared
 from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.scoring import image_metrics,pair_errors
 from DINOv3.MADEqual.aebad_s_projection_layer_diagnostic import metrics as pixels
@@ -141,7 +142,7 @@ def evaluate(bundle,out,domain,workers=2):
     import matplotlib
     matplotlib.use('Agg');figs=path/'figures';figs.mkdir(exist_ok=True)
     try:
-        for i,(s,maps,mask,sc,ck,inst,response,mr) in enumerate(shared.bounded_images(samples,lambda s:image_work(bundle,out,s,old),workers),1):
+        for i,(s,maps,mask,sc,ck,inst,response,mr) in enumerate(bounded_images(samples,lambda s:image_work(bundle,out,s,old),workers),1):
             n=mask.size;label[offset:offset+n]=mask.ravel()
             for b in NEW:memory[b][offset:offset+n]=maps[b].ravel()
             offset+=n;scores.extend(sc);checks.extend(ck);instances.extend(inst);responses.extend(response);map_records.extend(mr)

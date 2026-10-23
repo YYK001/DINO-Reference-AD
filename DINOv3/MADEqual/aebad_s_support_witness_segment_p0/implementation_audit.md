@@ -1,5 +1,15 @@
 # 实现审计：支持端第三图佐证 P0
 
+## 当前执行版本：2026-10-23优化
+
+旧版predict的域/层循环串行，cpu-workers没有用于该阶段，且逐连接/逐候选Python几何、JSON与SQLite构成主要开销。现由batch_witness.Engine批量计算同一FP64公式，GPU驻留单层支持特征，按唯一规范化连接生成数组证明。support-loo/predict与支持近邻一样按域×层调度单/双GPU进程；显式CPU模式按cpu-workers多进程。预测冻结按图并行，CPU原精确像素评价与原ADEval保持不变。
+
+邻居检索仍为FP64直接cdist及原行号并列规则，改为每层八支持特征一次传输并驻留、GPU内合并、按query块回传结果。新增连接批文件保留端点、第三图候选、alpha/rho、原因和来源掩码，替代生产逐边SQLite；原method.witness/Connections保留为标量参考，没有改动数学内核或历史正式结果。
+
+NumPy/Torch的FP64归约次序可能不同，边界附近用原标量计算复核该连接，最终不放宽alpha/rho。其判定域、缓存格式/配置检查及所有保留的停止条件见[执行优化与检查清单](execution_optimization.md)。本轮没有新增容量门槛、全域预扫描、逐点哈希或失败换后端。代码身份/缓存格式变化使用新输出目录，不覆盖旧目录。
+
+实际测试覆盖真实NumPy与Torch CPU生产内核、原标量对照、候选并集、边界、整图留出、缓存重排/续跑/修改拒绝、实际NPZ与并行地图评分冻结。设备分配测试用替身验证，尚未运行真实CUDA、双卡计算或正式实验；不能把本地修复写成GPU验证成功。详见local_validation/batch_execution_validation.json。
+
 本轮不执行真实实验。研究依据已读：窗口报告第13/18/22/27/28节、background连接级复核与端点长度分析、原SEGMENT/GAP/crossdomain/replay实现。端点长度不足以支持统一删长连接；PAIR和GAP结果存在定位/实例损失，旧损失“有所恢复”不等于完全修复。支持敏感性878张与本轮原K8的926张协议不同，不能混用。
 
 ## 复用与新增

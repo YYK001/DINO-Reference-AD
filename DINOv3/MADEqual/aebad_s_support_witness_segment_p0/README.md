@@ -1,5 +1,7 @@
 # 跨支持图佐证的局部参照扩展：固定 P0
 
+**当前执行版本（2026-10-23）**：支持间检索、整图留一和正式缓存预测均支持显式单/双GPU；佐证改为批量FP64，连接缓存改为数组批文件，CPU冻结/评价使用多核。下文旧串行/SQLite说明仅代表先前版本。当前执行、检查清单及新目录命令见[执行优化说明](execution_optimization.md)。公式与评价未改，真实CUDA提速尚未验证。
+
 这是独立实验工具，研究原 Top2 连接是否能由第三张正常支持图的实际 patch 佐证。不是新检测器的有效性结论，不保证整条线段正常、物理同源或缺陷保持。不得把互近邻、图结构、插值或留一本身写为首创性。
 
 本地只执行合成CPU测试、语法检查和只读预检，没有执行真实模型、支持检索或正式实验。2026-10-22用户已授权在AutoDL恢复缺失支持特征并启动正式实验，新增显式恢复与整轮运行入口；本工具不自行连接服务器。历史代码、结果和窗口报告不改。
@@ -8,7 +10,7 @@
 
 原 seed42 K8，background 297（85/212）、illumination 265（67/198）、view 364（84/280），共926张。各域保留原支持顺序和排除规则，不使用878张敏感性共同子集。原Source、完整K8、L7/L15/L23/L31、1280维原始特征、patch/image MAD、CH1和CURRENT、原四层FP32均值和插值均冻结。三个域已用于开发，不是盲测。
 
-每层、每个支持patch，分别在每张其他图检索 `k_w=5`。采用原始欧氏距离、不归一化、投影或采样；保存原特征行号。CPU为SciPy FP64直接`cdist`；显式CUDA为Torch FP64 `cdist(compute_mode='donot_use_mm_for_euclid_dist')`，GPU稳定排序后只传回块内5个候选。所有并列按距离、原始行号排序，跨块同样处理，不常驻全库两两矩阵。CPU/CUDA是明确的执行配置，正式开始后`neighbor_config.json`冻结，不能续跑时切换数值后端。历史查询距离不重新计算、不换后端。
+每层、每个支持patch，分别在每张其他图检索 `k_w=5`。采用原始欧氏距离、不归一化、投影或采样；保存原特征行号。CPU为SciPy FP64直接`cdist`；显式CUDA为Torch FP64 `cdist(compute_mode='donot_use_mm_for_euclid_dist')`，GPU稳定排序、块间合并后按query块回传最终5个邻居。所有并列按距离、原始行号排序，跨块同样处理，不常驻全库两两矩阵。CPU/CUDA是明确的执行配置，正式开始后`neighbor_config.json`冻结，不能续跑时切换数值后端。历史查询距离不重新计算、不换后端。
 
 无向连接按 `(support_id, patch_row)` 规范化。对第三张图c，候选仅为 `N_c^5(u) ∪ N_c^5(v)`，不是整库穷尽线段搜索。FP64直接差分计算：
 
@@ -69,13 +71,13 @@ $env:OMP_NUM_THREADS='1'; $env:MKL_NUM_THREADS='1'; $env:OPENBLAS_NUM_THREADS='1
 & $py -B -u -m $module prepare-support --output-dir $out --support-root $features --domains background --devices cuda:0
 # 同一算法也可显式 --devices cpu，属于真实SciPy计算，预计较慢；不是自动降级。
 
-# CPU，整张支持图留一。不能把h当端点或佐证，不含Source检索。
-& $py -B -u -m $module support-loo --output-dir $out --support-root $features --domains background
+# GPU批量佐证，整张支持图留一。不能把h当端点或佐证，不含Source检索。
+& $py -B -u -m $module support-loo --output-dir $out --support-root $features --domains background --devices cuda:0 --cpu-workers 8
 
-# CPU，只处理原query距离/索引和支持关系，不提取query特征。
-& $py -B -u -m $module predict --output-dir $out --support-root $features --domains background --limit 3
+# GPU批量处理原query距离/索引与支持关系；CPU并行冻结，不提取query特征。
+& $py -B -u -m $module predict --output-dir $out --support-root $features --domains background --devices cuda:0 --cpu-workers 8 --limit 3
 # 上条是少量缓存smoke，状态partial，不能冒充全域完成。正式冻结同命令去掉 --limit 3。
-& $py -B -u -m $module predict --output-dir $out --support-root $features --domains background
+& $py -B -u -m $module predict --output-dir $out --support-root $features --domains background --devices cuda:0 --cpu-workers 8
 
 # CPU，冻结后读GT；两新分支全像素精确ROC/AP，原两分支复核后引用。
 & $py -B -u -m $module evaluate --output-dir $out --domains background --cpu-workers 2
@@ -115,7 +117,7 @@ tail -n 40 -f "${RUN}_launcher.log"
 
 明确加入了**全部阶段与打包成功后关机**。中途报错不关机，保存失败review与全部现场；没有按可用RAM、显存或磁盘估算阻断。实际分配/IO错误仍失败。代码不安装环境；启动最先检查现有依赖和原ADEval1.1.0。缺依赖先明确失败，不会跑数小时后才发现评价器缺失。支持恢复需要checkpoint与原DINOv3宿主；默认官方源码随GitHub放在`external_baselines/dinov3`，可用`--dinov3`显式改路径。
 
-默认上例单卡。确实有两卡时显式改为 `--devices cuda:0 cuda:1`，恢复按域、支持间检索按域×层、AUPRO按域×分支分配独立进程；不能把两卡显存相加。CPU评价使用有界地图处理和原精确全像素排序。没有CPU容量前置判断，没有错误后自动切换后端。
+默认上例单卡。确实有两卡时显式改为 `--devices cuda:0 cuda:1`，恢复按域、支持间检索/留一/预测按域×层、AUPRO按域×分支分配独立进程；不能把两卡显存相加。CPU评价使用有界地图处理和原精确全像素排序。没有CPU容量前置判断，没有错误后自动切换后端。
 
 完整阶段：环境 → 恢复输入只读核查 → 24张固定正常支持提取 → CPU历史几何复核 → 正常preflight → 新支持间k5检索 → 整图留一 → 原926张缓存预测 → CPU评价 → 6项原AUPRO → 完整汇总 → review打包。**不重新提取926张query，不重建Source memory，不重新拟合MAD。**
 
@@ -179,7 +181,7 @@ CPU中间像素结果`*_exact_pixels.json`在整域状态提交之前，先通�
 
 完整表为metrics、metric_comparisons、support_loo_metrics、connection_summary、reduction_summary、mechanism_summary、normal_tail、ranking_summary、defect_instances、margin_transitions、margin_transition_summary、numerical_verification、objective_report和status。旧PAIR/GAP可作为研究背景，不在本工具运行或伪装成新分支。
 
-支持间检索不是零成本。按每图13924个patch，单域单层有56个有向图对，共约108.6亿对距离；三域四层总约1303亿对。邻居表未压缩约0.697GiB，不常驻全部距离。一次只加载一层八个支持特征；GPU块默认64×1024 FP64。连接唯一数/接受率未知，SQLite可能成为主要新增磁盘成本，**不能承诺固定小磁盘足够**。测试query最多约5157万次逐层连接请求，按唯一键去重；不会预先穷举所有端点对。
+支持间检索不是零成本。按每图13924个patch，单域单层有56个有向图对，共约108.6亿对距离；三域四层总约1303亿对。邻居表未压缩约0.697GiB，不常驻全部距离。一次只加载一层八个支持特征；GPU检索块默认256×2048 FP64。连接唯一数/接受率未知，当前连接数组证明可能成为主要新增磁盘成本，**不能承诺固定小磁盘足够**。测试query最多约5157万次逐层连接请求，按唯一键去重；不会预先穷举所有端点对。
 
 cost.json及cost_records分别记录支持间检索、连接判定、留一、查询缓存处理、地图评价的墙钟与进程峰值RAM；显式GPU worker另记Torch/CUDA与显存峰值，独立worker记录与调度器开销不能相加冒充推理延迟。实际真实峰值和时间尚未测量。原先已成功CPU/ADEval环境只是可用线索，本轮没有调用GPU验证。
 

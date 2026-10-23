@@ -3,9 +3,11 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import queue
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 from . import inputs as ip,storage as st
 from .method import LAYERS,NEW
@@ -25,13 +27,28 @@ def parser():
     p.add_argument('--dinov3',type=Path,default=ip.parent.ROOT/'external_baselines/dinov3')
     p.add_argument('--domains',nargs='+',choices=ip.DOMAINS,default=list(ip.DOMAINS))
     p.add_argument('--layers',nargs='+',type=int,choices=LAYERS,default=list(LAYERS))
-    p.add_argument('--devices',nargs='+',default=['cpu'],help='prepare-support: cpu or explicit cuda:0 [cuda:1]; AUPRO requires CUDA')
-    p.add_argument('--query-chunk',type=int,default=64);p.add_argument('--reference-chunk',type=int,default=1024)
+    p.add_argument('--devices',nargs='+',default=['cpu'],help='NN/LOO/predict: cpu or explicit cuda:0 [cuda:1]; AUPRO requires CUDA')
+    p.add_argument('--query-chunk',type=int,default=256);p.add_argument('--reference-chunk',type=int,default=2048)
+    p.add_argument('--witness-batch',type=int,default=256,help='unique connections per FP64 geometry batch; not a method parameter')
     p.add_argument('--cpu-workers',type=int,default=2);p.add_argument('--limit',type=int)
     p.add_argument('--no-write',action='store_true',help='preflight already never creates experiment outputs')
     p.add_argument('--worker',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--branch',choices=NEW,help=argparse.SUPPRESS)
     return p
+
+
+def run_worker(cmd,log):
+    """Tee worker progress to its file AND the main stage log in real time."""
+    with Path(log).open('a',encoding='utf-8') as f:
+        proc=subprocess.Popen(cmd,cwd=ip.parent.ROOT,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+            text=True,encoding='utf-8',errors='replace',bufsize=1,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        try:
+            for line in proc.stdout:
+                f.write(line);f.flush();print(line,end='',flush=True)
+            return proc.wait()
+        finally:
+            proc.stdout.close()
 
 
 def parallel_jobs(a,bundle,out,tasks):
@@ -40,7 +57,13 @@ def parallel_jobs(a,bundle,out,tasks):
     Explicit devices are honored; no RAM/VRAM/disk estimate admission and no
     automatic switch to CPU/single card on errors. Unaffected jobs are retained.
     """
-    if len(a.devices)>2 or len(set(a.devices))!=len(a.devices) or any(not d.startswith('cuda:') for d in a.devices):raise ValueError('choose one or two distinct explicit CUDA devices')
+    cpu=a.devices==['cpu']
+    if not cpu and (not 1<=len(a.devices)<=2 or len(set(a.devices))!=len(a.devices) or any(not d.startswith('cuda:') for d in a.devices)):
+        raise ValueError('choose cpu or one/two distinct explicit CUDA devices')
+    devices=['cpu']*min(a.cpu_workers,len(tasks)) if cpu else a.devices
+    pending=queue.Queue()
+    failed=threading.Event()
+    for task in tasks:pending.put(task)
     paths=[]
     for k in ip.parent.defaults():paths+=['--'+k.replace('_','-'),str(getattr(a,k))]
     for root in a.support_root:paths+=['--support-root',str(root)]
@@ -49,18 +72,25 @@ def parallel_jobs(a,bundle,out,tasks):
     paths+=['--dinov3',str(a.dinov3)]
     def lane(item):
         lane_index,device=item
-        for d,value in tasks[lane_index::len(a.devices)]:
-            extra=['--layers',str(value)] if a.stage=='prepare-support' else [] if a.stage=='recover-support' else ['--branch',value]
+        while not failed.is_set():
+            try:d,value=pending.get_nowait()
+            except queue.Empty:break
+            extra=['--layers',str(value)] if a.stage in ('prepare-support','support-loo','predict') else [] if a.stage=='recover-support' else ['--branch',value]
+            if a.limit is not None:extra+=['--limit',str(a.limit)]
             cmd=[sys.executable,'-B','-u','-m',__package__+'.runner',a.stage,*paths,'--output-dir',str(out),'--domains',d,
-                '--devices',device,'--worker',*extra,'--query-chunk',str(a.query_chunk),'--reference-chunk',str(a.reference_chunk)]
+                '--devices',device,'--worker',*extra,'--query-chunk',str(a.query_chunk),'--reference-chunk',str(a.reference_chunk),
+                '--witness-batch',str(a.witness_batch),'--cpu-workers','1']
             log=out/'logs'/a.stage/(d+'_'+str(value)+'.log');log.parent.mkdir(parents=True,exist_ok=True)
             print(f'[witness dispatch] {a.stage} {d}/{value} {device} log={log}',flush=True)
-            with log.open('a',encoding='utf-8') as f:
-                proc=subprocess.run(cmd,cwd=ip.parent.ROOT,stdout=f,stderr=subprocess.STDOUT,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-            if proc.returncode:raise RuntimeError(f'worker failed ({proc.returncode}); preserved {log}')
-    with ThreadPoolExecutor(max_workers=len(a.devices)) as pool:list(pool.map(lane,enumerate(a.devices)))
-    return dict(status='requested_jobs_complete',jobs=len(tasks),devices=a.devices)
+            try:rc=run_worker(cmd,log)
+            except BaseException:
+                failed.set()
+                raise
+            if rc:
+                failed.set()
+                raise RuntimeError(f'worker failed; preserved {log}')
+    with ThreadPoolExecutor(max_workers=len(devices)) as pool:list(pool.map(lane,enumerate(devices)))
+    return dict(status='requested_jobs_complete',jobs=len(tasks),devices=a.devices,process_lanes=len(devices))
 
 
 def resources():
@@ -85,7 +115,7 @@ def main(argv=None):
     a=parser().parse_args(argv);tick=time.perf_counter();bundle=None
     try:
         if a.limit is not None and a.limit<1:raise ValueError('positive prediction smoke limit required')
-        if not 1<=a.cpu_workers<=8 or a.query_chunk<1 or a.reference_chunk<1:raise ValueError('invalid execution chunk/workers')
+        if a.cpu_workers<1 or min(a.query_chunk,a.reference_chunk,a.witness_batch)<1:raise ValueError('positive execution chunks/workers required')
         a.domains=list(dict.fromkeys(a.domains));a.layers=list(dict.fromkeys(a.layers))
         bundle=ip.Bundle({k:getattr(a,k) for k in ip.parent.defaults()},
             recovered_supports=None if a.stage in ('recover-support','verify-support') else a.recovered_supports)
@@ -138,19 +168,24 @@ def main(argv=None):
         if a.stage=='prepare-support':
             from . import supports
             supports.configure(out,a.devices[0],a.query_chunk,a.reference_chunk)
-            if a.devices!=['cpu'] and not a.worker:
+            if not a.worker:
                 result=parallel_jobs(a,bundle,out,[(d,l) for d in a.domains for l in a.layers])
             else:
                 result=[supports.prepare(bundle,out,locations,d,l,device=a.devices[0],query_chunk=a.query_chunk,reference_chunk=a.reference_chunk) for d in a.domains for l in a.layers]
         elif a.stage=='support-loo':
             from .supports import support_loo
-            result=[support_loo(bundle,out,locations,d,l) for d in a.domains for l in a.layers]
+            if not a.worker:result=parallel_jobs(a,bundle,out,[(d,l) for d in a.domains for l in a.layers])
+            else:result=[support_loo(bundle,out,locations,d,l,device=a.devices[0],witness_batch=a.witness_batch) for d in a.domains for l in a.layers]
         elif a.stage=='predict':
             from . import prediction
-            result=[]
-            for d in a.domains:
-                for l in a.layers:prediction.predict_layer(bundle,out,locations,d,l,a.limit)
-                result.append(prediction.freeze_domain(bundle,out,d))
+            if a.worker:
+                result=[prediction.predict_layer(bundle,out,locations,d,l,a.limit,device=a.devices[0],witness_batch=a.witness_batch)
+                    for d in a.domains for l in a.layers]
+            else:
+                parallel_jobs(a,bundle,out,[(d,l) for d in a.domains for l in a.layers])
+                # GPU workers own disjoint layer paths. Only the coordinator
+                # freezes complete domains, after every layer job has joined.
+                result=[prediction.freeze_domain(bundle,out,d,workers=a.cpu_workers) for d in a.domains]
         elif a.stage=='evaluate':
             from .evaluation import evaluate
             result=[evaluate(bundle,out,d,a.cpu_workers) for d in a.domains]
@@ -166,7 +201,7 @@ def main(argv=None):
             result=summarize(bundle,out)
         record=dict(stage=a.stage,domains=a.domains,layers=a.layers,seconds=time.perf_counter()-tick,**resources(),
             torch_imported='torch' in sys.modules,timing_scope='offline stage, not end-to-end model inference',result=result)
-        key=a.stage+'_'+('_'.join(a.domains))+('_'+str(a.layers[0]) if a.worker and a.stage=='prepare-support' else '')+('_'+a.branch if a.branch else '')
+        key=a.stage+'_'+('_'.join(a.domains))+('_'+str(a.layers[0]) if a.worker and a.stage in ('prepare-support','support-loo','predict') else '')+('_'+a.branch if a.branch else '')
         st.write_json(out/'cost_records'/(key+'.json'),record)
         # Workers write distinct cost records. The coordinator alone aggregates.
         if not a.worker:st.write_json(out/'cost.json',{p.stem:st.read_json(p) for p in (out/'cost_records').glob('*.json')})
