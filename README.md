@@ -117,3 +117,9 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 ## WITNESS从原图完整重跑
 
 没有旧缓存、Source bank或MAD的新设备使用[独立fresh入口](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README_fresh.md)。从AeBAD原图及官方权重重建521/66 Source划分、100K memory、两级MAD、24支持和926查询；GPU批量WITNESS及四分支完整评价。单卡、最多8个CPU worker、tmux、HDD大缓存、成功/失败review打包；不自动关机。真实DINOv3/Source采样/CUDA仍待运行，CPU轻量验证不能冒充正式通过。
+
+## 固定Target局部图与第三方正常佐证
+
+[运行说明](DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/implementation_audit.md)。独立fresh入口保留原Source/两级MAD、seed42三域926张，正常整图留一选择固定互近邻图与完整第三方佐证，比较七分支及两种缩距控制。显式支持复用当前机器已封存fresh资产，不依赖旧AutoDL缓存；单卡、最多8个CPU worker、stream/disk查询缓存、tmux和分阶段续跑，无容量准入门槛或自动关机。
+
+34项新专项与42项原实现回归共76项本地CPU测试通过；真实DINOv3提取、CUDA、真实规模图与ADEval GPU尚未验证。测试含骨干/银行替身，不代表正式实验成功。额外seed43/44须显式使用878张共同名单，不与926主表混用。

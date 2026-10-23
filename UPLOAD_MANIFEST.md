@@ -583,3 +583,25 @@ DINOv3/MADEqual/aebad_s_support_witness_segment_p0/implementation_audit.md
 DINOv3/tests/test_aebad_s_witness_fresh.py
 ```
 仅代码、测试及说明；不含原图、权重、冻结输入包、测试临时目录或正式结果。
+
+## 固定Target图独立工具（2026-10-23）
+
+新增15个工具/测试/文档文件，另更新README和本清单。仅发布源码与说明，不含实验资产或历史报告。
+
+```text
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/__init__.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/graph.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/inputs.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/neighbors.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/numerics.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/prediction.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/protocol.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/README.md
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/reporting.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/runner.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/runtime.py
+DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/selection.py
+DINOv3/tests/test_aebad_s_fixed_target_graph.py
+```
