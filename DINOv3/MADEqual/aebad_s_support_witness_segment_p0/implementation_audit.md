@@ -1,5 +1,13 @@
 # 实现审计：支持端第三图佐证 P0
 
+## 2026-10-23：不依赖旧产物的独立重跑
+
+新增fresh/fresh_inputs/fresh_runtime/fresh_evaluation，原runner及数学内核不改。新机器只需要原AeBAD原图和官方权重；原521顺序、66校准、455构库、100K/layer、100轮原采样、固定CRC32 K8和926评价名单保持。源构库实际使用父runner的augmented_preprocessing([0.8,1.2])，查询/支持亮度1；以真实调用链为准，不误标Source NoAug。RGB懒加载+原identity回调/磁盘spool不改变特征或采样准则。
+
+本轮重算Source及两级MAD，使用原observe_fewshot_pil同次回调及add_geometry生成新检索/SEGMENT；随后复用原GPU批量近邻/佐证、整图留一、缩距匹配和预测冻结。四分支均重算CPU像素及12项AUPRO，不引用历史指标。图片/支持/协议不变不等于bank/MAD/距离字节已经复现，报告明确新运行身份。GT在全926预测冻结后才解码。
+
+新输出、原图及HDD大缓存分离；默认预检不导入Torch，不建目录。配置/软件/代码/名单、分阶段封存、同次回调、原几何/ULP/评分、CPU指标seal/像素数、AUPRO地图身份和完成条件继续核验，无容量门槛、自动换设备或关机。完整检查、资源及tmux命令见README_fresh.md。轻量测试不是DINOv3、Source采样或CUDA正式验证。
+
 ## 当前执行版本：2026-10-23优化
 
 旧版predict的域/层循环串行，cpu-workers没有用于该阶段，且逐连接/逐候选Python几何、JSON与SQLite构成主要开销。现由batch_witness.Engine批量计算同一FP64公式，GPU驻留单层支持特征，按唯一规范化连接生成数组证明。support-loo/predict与支持近邻一样按域×层调度单/双GPU进程；显式CPU模式按cpu-workers多进程。预测冻结按图并行，CPU原精确像素评价与原ADEval保持不变。

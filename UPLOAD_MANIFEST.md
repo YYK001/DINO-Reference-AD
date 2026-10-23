@@ -568,3 +568,18 @@ DINOv3/MADEqual/aebad_s_support_witness_segment_p0/supports.py
 DINOv3/tests/test_aebad_s_witness_batch.py
 ```
 仅代码、测试和运行/检查说明；不含local_validation、数据、权重、支持特征、预测或正式结果。
+
+
+## 2026-10-23 WITNESS独立从零重跑
+
+```text
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README.md
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README_fresh.md
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/fresh.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/fresh_evaluation.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/fresh_inputs.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/fresh_runtime.py
+DINOv3/MADEqual/aebad_s_support_witness_segment_p0/implementation_audit.md
+DINOv3/tests/test_aebad_s_witness_fresh.py
+```
+仅代码、测试及说明；不含原图、权重、冻结输入包、测试临时目录或正式结果。

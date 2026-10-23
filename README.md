@@ -112,3 +112,8 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [当前执行和检查清单](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/execution_optimization.md)：近邻检索、整图留一和预测支持显式单/双GPU，CPU冻结/评价支持指定worker；公式和评价不变。93项本地CPU测试通过，包含实际Torch CPU内核；真实CUDA、多卡计算与GPU加速比尚待验证。
 
 代码可在其他Linux/Windows设备克隆，AutoDL入口只是可选编排工具。数据、权重、恢复支持和冻结输入包不在GitHub中，需要单独迁移；在新设备准备环境并显式传入路径，历史正式结果不覆盖。
+
+
+## WITNESS从原图完整重跑
+
+没有旧缓存、Source bank或MAD的新设备使用[独立fresh入口](DINOv3/MADEqual/aebad_s_support_witness_segment_p0/README_fresh.md)。从AeBAD原图及官方权重重建521/66 Source划分、100K memory、两级MAD、24支持和926查询；GPU批量WITNESS及四分支完整评价。单卡、最多8个CPU worker、tmux、HDD大缓存、成功/失败review打包；不自动关机。真实DINOv3/Source采样/CUDA仍待运行，CPU轻量验证不能冒充正式通过。
