@@ -131,3 +131,9 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [独立加速入口](DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/README.md)复用上述父运行已冻结的Source、支持、最终图、正常LOO选择及已完成逐图预测，不重做构图。FP32端点初筛配合保守误差区间、全局两遍筛选与FP64直接复核；压紧实际启用边及端点，胜边仍对应父图原编号。原骨干、离散NN、七分支公式与评价不变。使用独立结果/缓存目录，父产物只读。
 
 18项加速专项与101项相关旧回归通过，实际检索在Torch CPU上验证；真实4090速度、CUDA数值核对和完整预测尚待显式smoke及少量完整图像测速。review按报告文件类型打包，并剪除评价scratch目录，失败残留BIN不会进入结果包。不宣称FP16骨干或已测得加速倍数，无容量前置门槛，不自动关机。
+
+## 固定图的单遍FP32融合预测
+
+[FP32独立入口与运行说明](DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/README.md)复用原Source、MAD、支持、最终图和正常LOO选择，单遍访问合法边，使用宽FP32 GEMM和Triton融合块内筛选/投影/归约，减少Python逐块派发。FP32逐图预测独立生成，旧FP64预测仅作数值参考；原SEGMENT对照和评价精度不变。smoke核对后用`bench --limit 3`测完整图像，不默认据局部测试宣称提速。
+
+18项新专项＋56项相关回归共74项CPU测试通过。本地没有Triton，CUDA融合路径尚未实际编译、执行或测速；需要服务器验证。默认预检不导入GPU库，不自动安装依赖，无容量门槛和自动关机。

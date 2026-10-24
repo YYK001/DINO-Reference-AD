@@ -636,3 +636,18 @@ DINOv3/tests/test_aebad_s_fixed_graph_acceleration.py
 ## 加速入口review打包修复（2026-10-24）
 
 更新加速模块runner、README、implementation_audit与专项测试，另更新仓库README及本清单。打包剪除评价scratch目录并限定报告类型，保留故障现场；不修改预测或评价数值。18项专项通过，不含实验数据或结果。
+
+## 单遍FP32融合预测（2026-10-24）
+
+新增以下8个工具、测试和说明文件，另更新仓库README与本清单。原固定图和上轮混合精度模块不变；不含数据、权重、缓存、实验结果或历史报告。CPU专项与回归共74项通过；真实Triton/CUDA编译、数值和速度待服务器smoke/bench验证。
+
+```text
+DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/__init__.py
+DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/kernels.py
+DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/README.md
+DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/runner.py
+DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/search.py
+DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/service.py
+DINOv3/tests/test_aebad_s_fixed_graph_fp32.py
+```
