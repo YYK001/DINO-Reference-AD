@@ -632,3 +632,7 @@ DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/runner.py
 DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/search.py
 DINOv3/tests/test_aebad_s_fixed_graph_acceleration.py
 ```
+
+## 加速入口review打包修复（2026-10-24）
+
+更新加速模块runner、README、implementation_audit与专项测试，另更新仓库README及本清单。打包剪除评价scratch目录并限定报告类型，保留故障现场；不修改预测或评价数值。18项专项通过，不含实验数据或结果。

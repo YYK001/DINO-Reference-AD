@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -161,6 +162,58 @@ class MixedSearch(unittest.TestCase):
 
 
 class Contracts(unittest.TestCase):
+    def test_review_pack_excludes_scratch_and_raw_payloads_but_keeps_reports(self):
+        from DINOv3.MADEqual.aebad_s_fixed_graph_acceleration_p0 import runner
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            out=Path(temp)/'run';out.mkdir()
+            reports={'objective_report.md':b'report','metrics.csv':b'branch,value\nU,1\n',
+                     'status.json':b'{"status":"failed"}', 'logs/evaluate.log':b'error',
+                     'evaluation/view/map_manifest.csv':b'sample,sha\n',
+                     'evaluation/view/metric.seal.json':b'{}',
+                     'figures/case.png':b'png', 'logs/evaluate.exitcode':b'2\n'}
+            for name,value in reports.items():
+                p=out/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(value)
+            excluded=('pixel_scratch/view/large.bin','pixel_scratch/view/diagnostic.json',
+                      'nested/_scratch/debug.log','nested/other_scratch/data.csv',
+                      'scratch_more/state.json','nested/scratch/plot.png',
+                      'accidental_raw.npz','leftover.bin','stage.pending')
+            for name in excluded:
+                p=out/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'not a review input')
+            # Large logical mmap file; sparse construction avoids allocating
+            # a real experiment-sized fixture. Its contents must not be read.
+            large=out/'pixel_scratch/view/large.bin'
+            with large.open('wb') as f:f.truncate(64<<20)
+            with contextlib.redirect_stdout(io.StringIO()):result=runner.pack(SimpleNamespace(output_root=out))
+            with tarfile.open(result['archive'],'r:gz') as archive:
+                self.assertEqual(set(archive.getnames()),{'run/'+name for name in reports})
+                for name,value in reports.items():
+                    self.assertEqual(archive.extractfile('run/'+name).read(),value)
+            self.assertEqual(large.stat().st_size,64<<20)
+            self.assertTrue(all((out/name).exists() for name in excluded))
+
+    def test_failed_evaluation_launcher_review_omits_abandoned_mmaps(self):
+        from DINOv3.MADEqual.aebad_s_fixed_graph_acceleration_p0 import runner
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            root=Path(temp);out=root/'run'
+            def stage(name,command,run_root):
+                if name=='evaluate':
+                    p=out/'pixel_scratch/view/labels.bin';p.parent.mkdir(parents=True)
+                    p.write_bytes(b'abandoned mmap')
+                    c.st.write_json(out/'pixel_scratch/debug.json',dict(temporary=True))
+                    p=out/'logs/evaluate.log';p.parent.mkdir(parents=True);p.write_text('MemoryError')
+                    raise MemoryError('evaluation allocation failed')
+            with (patch.object(c,'check_outputs'),
+                  patch('DINOv3.MADEqual.aebad_s_support_witness_segment_p0.autodl.run',side_effect=stage),
+                  contextlib.redirect_stdout(io.StringIO())):
+                with self.assertRaisesRegex(MemoryError,'allocation failed'):
+                    runner.main(['all','--parent-run',str(root/'parent'),'--output-root',str(out),
+                                 '--cache-root',str(root/'cache')])
+            with tarfile.open(root/'run_review.tar.gz','r:gz') as archive:
+                self.assertEqual(set(archive.getnames()),{'run/pipeline_status.json','run/logs/evaluate.log'})
+                saved=json.load(archive.extractfile('run/pipeline_status.json'))
+                self.assertFalse(saved['success']);self.assertEqual(saved['stage'],'evaluate')
+            self.assertTrue((out/'pixel_scratch/view/labels.bin').exists())
+
     def test_launcher_rejects_parent_output_before_writing_pipeline_status(self):
         from DINOv3.MADEqual.aebad_s_fixed_graph_acceleration_p0 import runner
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:

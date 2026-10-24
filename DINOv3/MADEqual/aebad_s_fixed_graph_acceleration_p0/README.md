@@ -75,7 +75,7 @@ tail -n 50 -F "${out}_launcher.log"
 - `mixed_smoke.json`：12项局部检索对照及原/新耗时。不是926张正式实验已通过。
 - 新缓存：小的独立来源JSON、原资产链接、新增图像的七分支距离及诊断；stream不保存完整Q。
 - `acceleration_costs/`：本轮各阶段耗时与进程RAM/CUDA峰值；复用的父阶段成本不计成算法加速。
-- 原七分支metrics、实例、机制及汇总报告；`*_review.tar.gz`只打包新输出的说明/评价/记录，大NPZ仍留在独立缓存目录。
+- 原七分支metrics、实例、机制及汇总报告；`*_review.tar.gz`按`.json/.csv/.tsv/.md/.txt/.log/.exitcode/.png/.svg/.pdf`类型打包说明、评价和记录。遍历前剪除`pixel_scratch`、`scratch`、`_scratch`、`*_scratch`和`scratch_*`目录，不遍历软链接；即使失败后残留`.bin`或scratch内JSON，也不会进入review包。不删除残留现场，不扫描大文件哈希；大NPZ仍留在独立缓存目录。
 
 保留或新增的检查全部列在这里：①父历史/输入哈希与版本身份；②选择、MAD和样本记录冻结；③新旧输出不重叠；④FP32输入有限性、索引、正长度及区间误差；⑤同Q的smoke距离容差及胜边；⑥全域预测冻结后才读取GT；⑦沿用原评价完整性/地图SHA/指标封存。**没有资源容量前置阻断**。检查不在每个query重新读取大权重。
 

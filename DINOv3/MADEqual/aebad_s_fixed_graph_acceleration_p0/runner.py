@@ -1,6 +1,7 @@
 """Default read-only preflight; explicit continuation, no model rebuild stages."""
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -9,6 +10,12 @@ from . import continuation as c, search
 
 
 STAGES = ('preflight', 'prepare', 'smoke', 'predict', 'evaluate', 'evaluate-aupro', 'summarize', 'pack', 'all')
+REVIEW_SUFFIXES = frozenset(('.json', '.csv', '.tsv', '.md', '.txt', '.log', '.exitcode', '.png', '.svg', '.pdf'))
+
+
+def scratch_directory(name):
+    name = name.casefold()
+    return name in ('scratch', '_scratch', 'pixel_scratch') or name.endswith('_scratch') or name.startswith('scratch_')
 
 
 def parser():
@@ -44,10 +51,19 @@ def preflight(args):
 
 def pack(args):
     archive = args.output_root.with_name(args.output_root.name+'_review.tar.gz')
-    # The independent output contains only metadata/reports, not linked large
-    # NPZ assets. Raw caches remain in the explicitly separate cache root.
+    # A failed allocation/interrupt can leave mmap payloads behind, including
+    # before evaluate's finally block starts. Never descend into scratch, even
+    # for JSON/log files there. Explicit file types also exclude raw arrays
+    # accidentally left elsewhere in the output. No payload hash/size scan.
     with tarfile.open(archive, 'w:gz', compresslevel=1, dereference=False) as tar:
-        tar.add(args.output_root, arcname=args.output_root.name)
+        for current, dirs, names in os.walk(args.output_root, topdown=True, followlinks=False):
+            dirs[:] = sorted(name for name in dirs if not scratch_directory(name)
+                             and not (Path(current)/name).is_symlink())
+            for name in sorted(names):
+                path = Path(current)/name
+                if path.suffix.casefold() in REVIEW_SUFFIXES and not path.is_symlink() and path.is_file():
+                    tar.add(path, arcname=(Path(args.output_root.name)/path.relative_to(args.output_root)).as_posix(),
+                            recursive=False)
     print('REVIEW_ARCHIVE='+str(archive), flush=True)
     return dict(archive=str(archive), bytes=archive.stat().st_size)
 
