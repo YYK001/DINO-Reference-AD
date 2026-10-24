@@ -618,3 +618,17 @@ DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/README.md
 DINOv3/MADEqual/aebad_s_fixed_target_graph_p0/runtime.py
 DINOv3/tests/test_aebad_s_fixed_target_graph.py
 ```
+
+## 固定图预测混合精度续跑（2026-10-24）
+
+新增以下7个工具、测试及说明文件，另更新仓库README与本清单。旧固定图/WITNESS源码不变，不含数据、权重、缓存、实验结果或历史报告。父图与已完成预测通过独立来源记录复用；新预测只补缺失图像。真实CUDA性能未验证。
+
+```text
+DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/__init__.py
+DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/continuation.py
+DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/README.md
+DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/runner.py
+DINOv3/MADEqual/aebad_s_fixed_graph_acceleration_p0/search.py
+DINOv3/tests/test_aebad_s_fixed_graph_acceleration.py
+```
