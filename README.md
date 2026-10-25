@@ -137,3 +137,9 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [FP32独立入口与运行说明](DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/README.md)复用原Source、MAD、支持、最终图和正常LOO选择，单遍访问合法边，使用宽FP32 GEMM和Triton融合块内筛选/投影/归约，减少Python逐块派发。FP32逐图预测独立生成，旧FP64预测仅作数值参考；原SEGMENT对照和评价精度不变。smoke核对后用`bench --limit 3`测完整图像，不默认据局部测试宣称提速。
 
 18项新专项＋56项相关回归共74项CPU测试通过。本地没有Triton，CUDA融合路径尚未实际编译、执行或测速；需要服务器验证。默认预检不导入GPU库，不自动安装依赖，无容量门槛和自动关机。
+
+## Source–Target正常对应残差适配
+
+[独立模块及工作站命令](DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/README.md)：三域固定K8与926张，SS/ST/TT正常伪对应、三种子残差网络、完整库逐行变换、每模型Source-only校准及固定z集成。仅接入迁移后fresh WITNESS和固定图两轮指定资产；无旧AutoDL依赖，缺失正常特征按原宿主补提取，不重跑图/WITNESS。单GPU、8 CPU worker上限、tmux、分阶段续跑及精确CPU/ADEval评价，不使用自定义Triton，不自动关机。
+
+包含评价scratch隔离修复：保护输入/父运行/cache，临时目录独立，分配失败只清理本次创建的文件。23项CPU测试中22项通过、1项因Windows软链接权限跳过；14份Python编译和Bash语法通过，真实DINO/CUDA/BF16训练及ADEval仍需正式运行验证。默认入口只读preflight，不安装环境或进行资源容量准入。

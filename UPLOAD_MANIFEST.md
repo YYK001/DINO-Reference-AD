@@ -651,3 +651,27 @@ DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/search.py
 DINOv3/MADEqual/aebad_s_fixed_graph_fp32_p0/service.py
 DINOv3/tests/test_aebad_s_fixed_graph_fp32.py
 ```
+
+## 正常对应驱动的残差适配（2026-10-25）
+
+发布独立模块及专项测试17个文件，另更新仓库README与本清单，共19个文件。包括独立评价scratch隔离、失败清理所有权修复；仅代码/测试/运行说明，不含数据、权重、cache、测试临时目录、实验结果或历史报告。无自定义Triton及编译工具链。
+
+```text
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/__init__.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/calibration.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/evaluation.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/implementation_audit.md
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/inputs.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/matching.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/model.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/prediction.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/protocol.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/README.md
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/reporting.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/runner.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/runtime.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/scripts/run_workstation.sh
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/storage.py
+DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/training.py
+DINOv3/tests/test_aebad_s_normal_correspondence_adaptation.py
+```
