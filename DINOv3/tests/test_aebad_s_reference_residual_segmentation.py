@@ -28,8 +28,11 @@ def catalog():
 
 
 class Temporary(unittest.TestCase):
-    def setUp(self):self.temp=tempfile.TemporaryDirectory(dir=BASE);self.root=Path(self.temp.name)
-    def tearDown(self):self.temp.cleanup()
+    def setUp(self):
+        st.configure('full')  # Existing corruption tests exercise explicit audit mode.
+        self.temp=tempfile.TemporaryDirectory(dir=BASE);self.root=Path(self.temp.name)
+    def tearDown(self):
+        st.configure('fast');self.temp.cleanup()
     def args(self,name='run'):
         return runner.normalize(runner.parser().parse_args(['--run-root',str(self.root/name),'--cache-root',str(self.root/(name+'_cache')),
             '--evaluation-scratch',str(self.root/(name+'_scratch')),'--data',str(self.root/'input.zip'),'--checkpoint',str(self.root/'weights.pth'),

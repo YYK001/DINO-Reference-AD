@@ -95,12 +95,12 @@ def synthetic(a,item):
         dest=a.cache_root/'synthetic_rgb'/item['item_id'];value={k:v for k,v in r.items() if k not in ('seal','identity','label_seal')}
         value.update(identity=ip.identity(a),origin=str(p),origin_seal=r['seal'])
         if r['status']=='valid':
-            if st.sha(p/'image.png')!=r['rgb_sha256']:raise ValueError('parent synthetic RGB modified')
+            st.verify_file(p/'image.png',r['rgb_sha256'])
             labels,lr=st.get(p/'labels')
             if lr['seal']!=r['label_seal']:raise ValueError('parent synthetic labels modified')
             dest.mkdir(parents=True,exist_ok=True);rgb=dest/'image.png'
             if rgb.exists():
-                if st.sha(rgb)!=r['rgb_sha256']:raise ValueError('uncommitted current RGB differs')
+                st.verify_file(rgb,r['rgb_sha256'])
             else:
                 try:rgb.hardlink_to((p/'image.png').resolve())
                 except OSError:shutil.copyfile(p/'image.png',rgb)
@@ -128,7 +128,8 @@ def tile_query(a,item):
         if not (oldrgb/'manifest.json').exists():continue
         old=st.sealed_json(oldrgb/'manifest.json');new=st.sealed_json(newrgb/'manifest.json')
         if old['item']!=new['item'] or any(item.get(k)!=v for k,v in old['item'].items()):continue
-        if old['rgb_sha256']!=new['rgb_sha256'] or st.sha(oldrgb/'image.png')!=old['rgb_sha256']:continue
+        if old['rgb_sha256']!=new['rgb_sha256']:continue
+        st.verify_file(oldrgb/'image.png',old['rgb_sha256'])
         labels,lr=st.get(p/'labels');current,cr=st.get(newrgb/'labels',('soft_output',))
         if cr['seal']!=new['label_seal'] or not np.array_equal(labels['soft'],current['soft_output']):raise ValueError('cached tile label differs from current RGB label')
         complete=st.sealed_json(p/'complete.json') if (p/'complete.json').exists() else None
@@ -176,7 +177,8 @@ def training_item(a,item,refs,catalogue,policies):
         else:
             original=parent['cache']/'synthetic_rgb'/item['item_id'];rgb=st.sealed_json(original/'manifest.json')
             current=st.sealed_json(a.cache_root/'synthetic_rgb'/item['item_id']/'manifest.json')
-            if rgb['rgb_sha256']!=current['rgb_sha256'] or st.sha(original/'image.png')!=rgb['rgb_sha256']:continue
+            if rgb['rgb_sha256']!=current['rgb_sha256']:continue
+            st.verify_file(original/'image.png',rgb['rgb_sha256'])
             if content(original/'labels',('soft_output',))['soft_output']!=content(p/'labels',('soft',))['soft']:raise ValueError('parent training label differs from generated RGB label')
         labels,lr=st.get(p/'labels')
         if lr['seal']!=old['labels_seal']:raise ValueError('parent training label modified')

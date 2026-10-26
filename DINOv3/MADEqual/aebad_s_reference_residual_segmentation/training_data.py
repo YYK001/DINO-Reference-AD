@@ -113,7 +113,8 @@ def prepare_training(a):
                 soft=np.zeros((item['row']['image_height']//4,item['row']['image_width']//4),np.float32)
             else:
                 rgb=a.cache_root/'synthetic_rgb'/item['item_id'];origin=st.sealed_json(rgb/'manifest.json')
-                if origin['seal']!=item['record_seal'] or st.sha(rgb/'image.png')!=origin['rgb_sha256']:raise ValueError('synthetic image changed')
+                if origin['seal']!=item['record_seal']:raise ValueError('synthetic image identity changed')
+                st.verify_file(rgb/'image.png',origin['rgb_sha256'])
                 from .reuse import tile_query
                 cached=tile_query(a,item)
                 if cached:q,geometry,soft=cached

@@ -154,7 +154,7 @@ def preflight(a):
     for path in a.recent_run:
         try:
             r=recent(path);base=r['cache'];c=r['catalog']
-            assets.append(dict(run=str(path),status='found_metadata; compatibility_and_payload_checked_in_prepare',kind=r['kind'],
+            assets.append(dict(run=str(path),status='found_metadata; dependency_metadata_checked_in_prepare; content_audit_opt_in',kind=r['kind'],
                 original_bank_present=(base/('source_original/manifest.json' if r['kind'] in ('correspondence','reference_residual') else 'source_bank.npz')).exists()))
             if r['kind']=='reference_residual':
                 from .synthesis import manifest
@@ -189,7 +189,7 @@ def preflight(a):
     if dependencies['adeval'] not in (None,'1.1.0'):errors.append('ADEval==1.1.0 required')
     return dict(status='blocked' if missing or errors or absent else 'inventory_ready_not_runtime_verified',
         missing_inputs=missing,errors=errors,missing_dependencies=absent,dependency_versions=dependencies,assets=assets,
-        config=cfg,job_plan=jobs,torch_imported='torch' in __import__('sys').modules,
+        config=cfg,job_plan=jobs,audit_mode=getattr(a,'audit_mode','fast'),torch_imported='torch' in __import__('sys').modules,
         new_computation=['two opposite-Source-fold original-sampler 100K training banks',
             f"{jobs['planned_synthetic_slots']} planned selected RGB slots; compatible cached slots/grids/NN imported, no hidden fill",
             'training tile+halo union Exact; full normal grids when actually covered; full-grid calibration/test unchanged',
@@ -214,6 +214,13 @@ def freeze(a,c,extraction):
         old=st.sealed_json(a.run_root/'inputs.json')
         if old['catalog']!=st.digest(c) or old['extraction']!=extraction:raise ValueError('legacy full_v1 inputs changed; no migration')
         return old
+    if (a.run_root/'inputs.json').exists():
+        old=st.sealed_json(a.run_root/'inputs.json')
+        if (old['config']!=cfg or old['catalog']!=st.digest(c) or old['extraction']!=extraction
+                or old['cache']!=str(a.cache_root) or old['query_mode']!=a.query_mode):raise ValueError('frozen run inputs changed; new directory required')
+        from .runner import validate_implementation
+        validate_implementation(old);plan(a)
+        return old  # Execution-only resume never re-signs prior inputs/catalog/config.
     fi.validate_catalog(c);validate_frozen_origins(c);st.sealed_json(a.run_root/'catalog.json',dict(catalog=c))
     st.sealed_json(a.run_root/'protocol.json',dict(cfg))
     resolved=st.sealed_json(a.run_root/'resolved_config.json',dict(config=cfg))
@@ -226,7 +233,7 @@ def freeze(a,c,extraction):
         'DINOv3/MADEqual/aebad_s_support_witness_segment_p0/evaluation.py','DINOv3/MADEqual/aebad_s_projection_layer_diagnostic/metrics.py',
         'DINOv3/MADEqual/aebad_s_projection_layer_diagnostic/numerics.py','DINOv3/MADEqual/aebad_s_ch1_scoring_inheritance/scoring.py',
         'DINOv3/MADEqual/aebad_s_segment_pair_crossdomain_p0/analysis.py','DINOv3/MADEqual/aebad_s_target_local_segment/geometry.py']
-    code={p.relative_to(ROOT).as_posix():st.sha(p) for p in list(Path(__file__).parent.glob('*.py'))+[Path(__file__).with_name('frozen_origins.json'),Path(__file__).with_name('legacy_full_v1_compatibility.json')]+[ROOT/p for p in shared]}
+    code={p.relative_to(ROOT).as_posix():st.sha(p) for p in list(Path(__file__).parent.glob('*.py'))+[Path(__file__).with_name('frozen_origins.json'),Path(__file__).with_name('legacy_full_v1_compatibility.json'),Path(__file__).with_name('execution_compatibility.json')]+[ROOT/p for p in shared]}
     from .reuse import rules
     value=dict(config=cfg,catalog=st.digest(c),cache=str(a.cache_root),query_mode=a.query_mode,
         extraction=extraction,code=code,resolved_config_seal=resolved['seal'],job_plan_seal=planned['seal'],artifact_rules=rules(cfg))

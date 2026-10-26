@@ -82,10 +82,28 @@
       "seconds": 171.423,
       "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\compact_final_validation.log",
       "scope": "constructed_CPU_only; actual_DINO_and_trained_head_provider_substituted_in_integration; AUPRO_report_fixture_only"
+    },
+    {
+      "name": "trusted_local_fast_execution_full_regression",
+      "tests": 87,
+      "passed": 87,
+      "skipped": 0,
+      "seconds": 198.424,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\fast_reads_full_regression.log",
+      "scope": "CPU only; original corruption tests explicitly full audit; new default fast tested by actual compact CPU integration with mocked DINO/trained-head providers"
+    },
+    {
+      "name": "final_registered_execution_resume_and_weight_reuse",
+      "tests": 4,
+      "passed": 4,
+      "skipped": 0,
+      "seconds": 0.806,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\fast_reads_resume_final.log",
+      "scope": "read-only 2c721a6 inputs, known backbone identity no rehash, frozen profile and CPU-only offline validation"
     }
   ],
   "python": "D:\\anaconda\\miniconda\\envs\\chinamoblie\\python.exe",
-  "compiled_Python_files": 23,
+  "compiled_Python_files": 24,
   "local_preflight": {
     "status": "blocked",
     "errors": [],
@@ -107,7 +125,7 @@
     "assets": [
       {
         "run": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\parent_metadata",
-        "status": "found_metadata; compatibility_and_payload_checked_in_prepare",
+        "status": "found_metadata; dependency_metadata_checked_in_prepare; content_audit_opt_in",
         "kind": "correspondence",
         "original_bank_present": false
       },
@@ -121,7 +139,7 @@
         "original_query_cache": "eligible only if full raw Q exists; z/distance/index are not features"
       }
     ],
-    "exit_code": 2
+    "audit_mode": "fast"
   },
   "original_metadata": {
     "Source": 521,
@@ -237,5 +255,24 @@
     "GPU_initialized": false,
     "remote_connected": false,
     "Git_pushed": false
+  },
+  "trusted_local_execution": {
+    "default_audit_mode": "fast",
+    "direct_NN_CPU_recomputation": false,
+    "existing_payload_read_SHA": false,
+    "original_normal_feature_full_value_scan": false,
+    "repeated_full_prediction_preflight_scan": false,
+    "repeated_AUPRO_map_GT_SHA": false,
+    "write_once_artifact_identities_retained": true,
+    "small_metadata_and_code_checks_retained": true,
+    "loss_gradient_finite_checks_retained": true,
+    "existing_same_shape_payload_edit_detection": "not guaranteed in fast mode; explicit full audit required",
+    "full_audit": "opt-in; unchanged physical file SHA memo shared by readers within process",
+    "fast_full_CPU_Exact_values_indices_equal": true,
+    "registered_readonly_resume_producer": "2c721a6",
+    "frozen_inputs_modified": false,
+    "current_pending_GPU_and_ADEval_validation": true,
+    "server_connected": false,
+    "server_smoke_started": false
   }
 }

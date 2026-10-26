@@ -6,7 +6,17 @@ import time
 import numpy as np
 from . import inputs as ip,storage as st
 from .protocol import CONFIG,DOMAINS
-from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation.training import checkpoint,load_checkpoint
+from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation.training import checkpoint
+
+
+def load_checkpoint(path,expected,device):
+    import torch
+    p=Path(path);record=st.sealed_json(p/'latest.json');file=p/record['file']
+    if record['inputs']!=expected:raise ValueError('checkpoint inputs changed')
+    st.verify_file(file,record['sha256'])
+    value=torch.load(file,map_location=device,weights_only=False)
+    if value['updates']!=record['updates']:raise ValueError('checkpoint update count changed')
+    return value
 
 
 def path(a,phase,family,seed):return a.run_root/'models'/phase/family/f'seed{seed}'

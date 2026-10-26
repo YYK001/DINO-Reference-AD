@@ -4,6 +4,27 @@
 
 ## 两种固定预算
 
+执行策略现默认 `--audit-mode fast`（脚本`AUDIT_MODE=fast`）。这是受信任本地磁盘的执行选项，不改变compact/full方法配置、训练日程或冻结输入身份。
+
+- 默认不重算已有特征、NN、RGB、checkpoint和评价结果的内容SHA；完整正常特征不再额外全数组扫描有限性。读NPY仍检查header形状/dtype、位置和必要索引。
+- prepare续跑沿用当前冻结的权重SHA，有可信父身份时沿用父权重SHA，不再重读3GB权重只为校验；没有任何既有身份的首次新权重仍生成一次SHA。fast不声称识别已信任权重在磁盘上的内容变动，真实模型加载仍要读取权重。
+- Exact仍返回原FP32距离/索引，默认取消每次检索后的CPU参照向量距离复算。
+- 训练、校准、预测按实际需要读数据；预测完成性检查改为三份域清单和原926人口，不在预测后、CPU评价前和AUPRO前重复遍历全部预测数组。实际消费时检查该图的manifest seal与冻结域清单一致。
+- AUPRO仍用原后端、原地图生成和GT resize，但默认不重复重算地图/GT内容SHA；检查几何和dtype。CPU评价首次生成的地图身份记录保留。
+- 新产物首次写入仍生成原有身份，已有产物身份不重签。小JSON seal、配置/日程/排除规则、索引/形状、loss/梯度有限性、MAD非退化、指标范围及完成数量检查保留；小型代码与环境身份检查保留。没有容量准入门槛。
+- `--audit-mode full`为显式内容审计：启用数组/地图SHA和CPU NN复算；同进程未变化的同一物理文件只hash一次，共用记忆记录，不再随`st.get`重新校验。默认fast不保证识别形状相同的磁盘内容改写，这是本地信任模式的明确取舍。
+
+已停止的`2c721a6` compact可以在原run/cache续跑。只读登记其旧代码身份，允许本次执行优化；不修改旧inputs、catalog、resolved_config、job_plan，不重提取已接入的正常特征。执行方式另记在`execution_sessions/`。未知方法代码修改、profile/数据/提取配置变化仍拒绝。
+
+之后手动续跑示例（先同步修订代码；本轮不连接或启动服务器）：
+
+```bash
+run=/home/ubun/YYK/runs/aebad_reference_residual_compact_v1_20261027_002907
+session=residual_fast_resume_$(date +%Y%m%d_%H%M%S)
+tmux new-session -d -s "$session" "AUDIT_MODE=fast bash '$run/launch.sh' '$run' >> '${run}_launcher.log' 2>&1"
+tail -n 30 -F "${run}_launcher.log"
+```
+
 |配置|compact_v1（默认）|full_v1（显式）|
 |---|---:|---:|
 |训练种子|42|42、43、44|
@@ -53,6 +74,8 @@ Source每张1个Poisson＋1个texture/scratch，后者按稳定455图清单交�
 ## 只读资产复用
 
 通过可重复 `--recent-run`或原始 `raw_assets.json`指定来源；不扫描已丢失AutoDL。已停止的本工具full运行也可作为只读父资产，允许在全合成池尚未完成时导入已封存的选中项。
+
+下表SHA字段在默认fast下用于匹配既有manifest中的声明，不重新扫描磁盘内容；只有显式full才检查内容。旧审计验证结果不能写成本轮fast重新验证通过。
 
 |资产|相容判断与处理|
 |---|---|
@@ -133,7 +156,9 @@ compact只检验单种子、小预算主方法在三域完整评价上是否值�
 2026-10-27收尾验证：73项CPU测试全部通过（171.423秒），23份Python文件编译通过，默认脚本`bash -n`通过。默认预检正确列出4个训练任务、13000 updates、1294计划槽位及9个定位评价任务；未导入Torch、未创建实验目录。当前本地预检仍缺DINOv3权重、官方源码及ADEval；父资产仅有本地元数据，未验证服务器实际缓存。另对登记旧版本的Poisson、texture、scratch各一例执行原生成函数比较，RGB/标签及诊断逐位一致；这只验证固定构造输入下的生成兼容性。
 
 ```bash
-python -B -m unittest DINOv3.tests.test_aebad_s_reference_residual_segmentation DINOv3.tests.test_reference_residual_execution DINOv3.tests.test_reference_residual_compact -v
+python -B -m unittest DINOv3.tests.test_aebad_s_reference_residual_segmentation DINOv3.tests.test_reference_residual_execution DINOv3.tests.test_reference_residual_compact DINOv3.tests.test_reference_residual_fast_reads -v
 ```
 
 范围和实测记录见 `implementation_audit.md`、`validation_results.json`。包含原full回归、compact三分支构造CPU接入、真实CPU Exact/梯度/续跑/只读兼容导入/稀疏位置映射；RGB宿主及训练模型来源在接入夹具中替代，评价人口缩为每域2张，不等于真实926图。AUPRO完成状态测试使用明确的报告夹具，不冒充实际后端运行。真实CUDA/BF16、稀疏GPU数值、大缓存复用及compact完整训练/评价均待review后的人工验证。本轮到此停止。
+
+fast执行修订：87项CPU回归通过（198.424秒），另4项最终续跑专项复核通过（0.806秒）；24份Python编译及脚本语法检查通过。新增测试直接禁止已有数组读路径调用SHA、禁止fast NN调用CPU norm，检查fast/full CPU Exact结果逐位相同、完整compact CPU接入、显式full检测内容改写及只读原目录续跑。真实服务器提速、CUDA及ADEval没有在本地执行。

@@ -33,6 +33,7 @@ def parser():
     p.add_argument('--no-write',action='store_true',help='preflight always read-only')
     p.add_argument('--reference-cache-gib',type=float,default=4.,help='bounded Exact reference tensor LRU; not a capacity admission check')
     p.add_argument('--profile',choices=('compact_v1','full_v1'),default='compact_v1')
+    p.add_argument('--audit-mode',choices=('fast','full'),default='fast',help='fast trusts local payloads; full explicitly enables SHA and direct NN audits')
     p.add_argument('--smoke-mode',choices=('constructed','assets','prepared'),default='constructed')
     p.add_argument('--smoke-updates',type=int,default=30)
     return p
@@ -90,6 +91,21 @@ def normalize(a):
     check_isolation(a);return a
 
 
+def validate_implementation(frozen):
+    """Small source files only; allow the registered execution-only revision."""
+    current={p:st.sha(ip.ROOT/p) for p in frozen['code']}
+    mismatch={p:sha for p,sha in frozen['code'].items() if current[p]!=sha}
+    if not mismatch:return
+    prefix='DINOv3/MADEqual/aebad_s_reference_residual_segmentation/'
+    saved={p:sha for p,sha in frozen['code'].items() if p.startswith(prefix)}
+    record=st.read_json(Path(__file__).with_name('execution_compatibility.json'))
+    pinned=all((current[p] if p in current else st.sha(ip.ROOT/p))==sha for p,sha in record['execution_revision_code'].items())
+    if saved==record['code'] and pinned and all(p.startswith(prefix) for p in mismatch):return
+    legacy=st.read_json(Path(__file__).with_name('legacy_full_v1_compatibility.json'))['code']
+    if (frozen.get('config')==CONFIG and pinned and all(p.startswith(prefix) and legacy.get(Path(p).name)==sha for p,sha in mismatch.items())):return
+    raise ValueError('implementation changed beyond registered execution revision: '+next(iter(mismatch)))
+
+
 def validate_runtime_inputs(a):
     frozen=st.sealed_json(a.run_root/'inputs.json')
     cfg=ip.config(a);ip.plan(a)
@@ -98,10 +114,7 @@ def validate_runtime_inputs(a):
     if not ip.legacy(a):
         if st.sealed_json(a.run_root/'resolved_config.json')['seal']!=frozen['resolved_config_seal'] or st.sealed_json(a.run_root/'job_plan.json')['seal']!=frozen['job_plan_seal']:raise ValueError('resolved config/job plan seal changed')
     if st.digest(ip.catalog(a))!=frozen['catalog']:raise ValueError('frozen image/support catalog changed')
-    for relative,sha in frozen['code'].items():
-        if st.sha(ip.ROOT/relative)!=sha:
-            legacy=st.read_json(Path(__file__).with_name('legacy_full_v1_compatibility.json'))['code']
-            if not ip.legacy(a) or not relative.startswith('DINOv3/MADEqual/aebad_s_reference_residual_segmentation/') or legacy.get(Path(relative).name)!=sha:raise ValueError('implementation changed after prepare: '+relative)
+    validate_implementation(frozen)
     e=frozen['extraction']
     offline=a.stage in ('evaluate','evaluate-aupro','summarize')
     if offline:
@@ -118,8 +131,9 @@ def validate_runtime_inputs(a):
         if st.sha(root/relative)!=sha:raise ValueError('extraction code changed: '+key)
     prepared=st.sealed_json(a.run_root/'prepared.json')
     if prepared['identity']!=frozen['identity'] or st.sealed_json(a.cache_root/'source_original/manifest.json')['seal']!=prepared['source_seal']:raise ValueError('formal Source bank identity changed')
-    for item in prepared['normal_features'].values():
-        if st.sealed_json(Path(item['path'])/'manifest.json')['seal']!=item['seal']:raise ValueError('full normal grid identity changed')
+    if st.full_audit():
+        for item in prepared['normal_features'].values():
+            if st.sealed_json(Path(item['path'])/'manifest.json')['seal']!=item['seal']:raise ValueError('full normal grid identity changed')
 
 
 def run_stage(a):
@@ -129,7 +143,7 @@ def run_stage(a):
     if a.stage=='prepare':
         if (a.run_root/'prepared.json').exists():
             validate_runtime_inputs(a)
-            return dict(status='original_assets_reused',payloads_verified_only_when_consumed=True)
+            return dict(status='original_assets_reused',payload_SHA_requested=st.full_audit(),payload_headers_checked_when_consumed=True)
         from .runtime import prepare
         return prepare(a)
     validate_runtime_inputs(a)
@@ -180,7 +194,7 @@ def pack(a):
 
 def common(a):
     values=[]
-    for k in ('run_root','cache_root','data','checkpoint','official_root','dinov3_root','device','cpu_workers','query_mode','evaluation_scratch','sampling_scratch','reference_cache_gib','profile'):
+    for k in ('run_root','cache_root','data','checkpoint','official_root','dinov3_root','device','cpu_workers','query_mode','evaluation_scratch','sampling_scratch','reference_cache_gib','profile','audit_mode'):
         values.extend(('--'+k.replace('_','-'),str(getattr(a,k))))
     for k in ('recent_run','asset_manifest'):
         for p in getattr(a,k):values.extend(('--'+k.replace('_','-'),str(p)))
@@ -221,9 +235,13 @@ def all_stages(a):
 
 def main(argv=None):
     a=normalize(parser().parse_args(argv))
+    st.configure(a.audit_mode)
     if a.stage=='preflight':
         r=ip.preflight(a);print(json.dumps(r,ensure_ascii=False,indent=2));return 2 if r['status']=='blocked' else 0
     if a.no_write:raise ValueError('--no-write is preflight only')
+    st.write_json(a.run_root/'execution_sessions'/f'{time.time_ns()}_{a.stage}.json',dict(
+        stage=a.stage,audit_mode=a.audit_mode,payload_read_SHA=a.audit_mode=='full',
+        direct_CPU_NN_recomputation=a.audit_mode=='full',frozen_inputs_rewritten=False))
     if a.stage=='all':result=all_stages(a)
     elif a.stage=='pack':result=pack(a)
     else:

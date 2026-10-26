@@ -200,7 +200,7 @@ class DataAndReuse(Temporary):
         self.assertEqual(linked['metadata']['origin_seal'],st.sealed_json(ip.item_path(parent,entry)/'tiles/0/manifest.json')['seal'])
         original=(p/'image.png').read_bytes();(p/'image.png').write_bytes(original+b'modified')
         with patch.object(reuse,'sources',return_value=[provider]):
-            with self.assertRaisesRegex(ValueError,'RGB modified'):reuse.synthetic(current,item)
+            with self.assertRaisesRegex(ValueError,'modified array/file'):reuse.synthetic(current,item)
         with patch.object(reuse,'sources',return_value=[provider]),patch.dict(pr.CONFIG,{'synthesis_seed':123}):
             self.assertFalse(reuse.compatible_rules(provider,pr.resolve(),'synthesis'))
     def test_parent_fold_reuse_ignores_training_budget_but_rejects_changed_sampler(self):

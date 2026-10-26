@@ -56,7 +56,8 @@ def training_completion(a):
         if not p.exists():pending.append(f'{phase}/{family}/seed{seed}: training');continue
         r=st.sealed_json(p);latest=st.sealed_json(p.parent/'latest.json')
         if (r['inputs']['identity']!=ip.identity(a) or r['updates']!=job['updates']
-                or r['checkpoint_sha256']!=latest['sha256'] or st.sha(p.parent/latest['file'])!=latest['sha256']):raise ValueError('incomplete/modified final checkpoint')
+                or r['checkpoint_sha256']!=latest['sha256']):raise ValueError('incomplete/modified final checkpoint')
+        st.verify_file(p.parent/latest['file'],latest['sha256'])
         jobs.append(dict(phase=phase,family=family,seed=seed,**{k:r[k] for k in ('updates','parameter_count','checkpoint_bytes','seconds')}))
     return pending,jobs
 

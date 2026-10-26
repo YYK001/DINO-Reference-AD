@@ -13,7 +13,18 @@ from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation.runtime import (
 def extraction_record(a):
     from importlib.metadata import version
     from DINOv3.MADEqual.aebad_s_segment_pair_crossdomain_p0.inputs import PRECISION
-    return dict(checkpoint_sha256=st.sha(a.checkpoint),host_config=st.read_json(a.official_root/'config.json'),precision=PRECISION,
+    known=None
+    if not st.full_audit():
+        if (a.run_root/'inputs.json').exists():known=st.sealed_json(a.run_root/'inputs.json')['extraction']['checkpoint_sha256']
+        else:
+            for path in getattr(a,'recent_run',[]):
+                try:provider=ip.recent(path)
+                except (OSError,ValueError,KeyError):continue
+                value=provider.get('inputs',{})
+                known=value.get('extraction',{}).get('checkpoint_sha256') if provider['kind']=='reference_residual' else value.get('checkpoint_sha256')
+                if known:break
+    st.verify_file(a.checkpoint,known)
+    return dict(checkpoint_sha256=known or st.sha(a.checkpoint),host_config=st.read_json(a.official_root/'config.json'),precision=PRECISION,
         software={n:version(n) for n in ('numpy','scipy','Pillow','torch','torchvision')},
         code={rel:st.sha(ip.ROOT/rel) for rel in ('DINOv3/relation_reliability/superadd_host.py',
             'DINOv3/ShiftADD/aebad_s_p0/memory.py','external_baselines/superadd_external/memory_variants.py',
@@ -44,7 +55,7 @@ def raw_layers(x,m):
     if not np.array_equal(np.sort(p),np.arange(n)):raise ValueError('sampled/incomplete grid cannot replace full raw features')
     for l in LAYERS:
         q=x[f'q{l}']
-        if q.shape!=(n,1280) or q.dtype!=np.float32 or not np.isfinite(q).all():raise ValueError('invalid raw feature layer')
+        if q.shape!=(n,1280) or q.dtype!=np.float32 or st.full_audit() and not np.isfinite(q).all():raise ValueError('invalid raw feature layer')
     return grid,p
 
 
@@ -160,7 +171,7 @@ def prepare(a):
             baseline=dict(patch=old['patch'],image=old['image'],scope='original_Source_only_distances',
                 origin=str(chosen_provider['run']),old_state_seal=old['seal'])
             st.sealed_json(a.run_root/'baseline_parent.json',dict(run=str(chosen_provider['run']),cache=str(chosen_provider['cache']),identity=chosen_provider['identity'],state=old))
-    model=None;calls=0;reused=0
+    model=None;calls=0;reused=0;existing=0
     with fi.Data(Path(c['data_root'])) as data:
         rows=c['source']+sum(c['supports'].values(),[])
         for i,row in enumerate(rows,1):
@@ -173,9 +184,10 @@ def prepare(a):
                     st.put(p,{**{f'q{l}':q[l] for l in LAYERS},'positions':np.asarray(m['positions'],np.int64)},
                         dict(identity=ident,image=row,kind='original_complete_grid',grid=m['grid'],
                             output_shape=[row['image_height']//4,row['image_width']//4],origin='fresh_original_host'))
+            else:existing+=1
             x,r=st.get(p);raw_layers(x,r['metadata'])
             if r['metadata']['identity']!=ident or r['metadata']['image']!=row:raise ValueError('normal feature identity changed')
-            print(f'[residual normal grids] {i}/{len(rows)} {row["relative_path"]}',flush=True)
+            print(f'[residual normal grids] {i}/{len(rows)} {row["relative_path"]} existing={existing} imported={reused} new_forwards={calls} audit={st.AUDIT_MODE}',flush=True)
     baseline_path=a.run_root/'input_distance_mad.json'
     if not baseline_path.exists():
         if baseline is None:baseline=fit_input_mad(a,c)
@@ -204,7 +216,7 @@ def prepare(a):
     st.sealed_json(a.run_root/'prepared.json',value)
     st.sealed_json(a.run_root/'raw_assets.json',dict(format='reference_residual_raw_assets_v1',catalog=c,extraction=record,
         source_bank=dict(path=str(bank),seal=br['seal']),normal_features=value['normal_features']))
-    return dict(status='original_assets_ready',normal_forward_calls=calls,reused_complete_grids=reused,
+    return dict(status='original_assets_ready',normal_forward_calls=calls,reused_complete_grids=reused,existing_complete_grids=existing,
         original_Source_origin=br['metadata']['origin'],Source_fold_banks='new in prepare-training')
 
 
@@ -240,7 +252,7 @@ def synthesize(a):
                 st.sealed_json(meta,dict(identity=ip.identity(a),item=item,**diag))
             r=st.sealed_json(meta)
             if r['identity']!=ip.identity(a) or r['item']!=item:raise ValueError('synthesis inputs changed')
-            if r['status']=='valid' and st.sha(p/'image.png')!=r['rgb_sha256']:raise ValueError('synthetic RGB modified')
+            if r['status']=='valid':st.verify_file(p/'image.png',r['rgb_sha256'])
             items.append(dict(**item,status=r['status'],record_seal=r['seal']))
             summaries.append(dict(origin=item['origin'],domain=rows[item['origin']].get('domain','Source'),variant=item['variant'],kind=item['kind'],
                 scale=('small','medium','large')[(item['variant']+st.seed(item['origin'])%3)%3],status=r['status'],reused='origin_seal' in r))

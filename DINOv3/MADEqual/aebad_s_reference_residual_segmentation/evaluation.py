@@ -1,7 +1,7 @@
 """Independent orchestration; unchanged exact metrics, map/GT and instance kernels."""
 from contextlib import contextmanager
 from pathlib import Path
-from types import FunctionType
+from types import FunctionType,SimpleNamespace
 import errno
 import tempfile
 import time
@@ -18,12 +18,25 @@ read_csv=previous.read_csv
 
 def bind(function,a):
     # Bind immutable math/orchestration with OUR names, never mutate old globals.
+    shared=SimpleNamespace(**vars(original.shared));shared.verify_map_record=verify_map_record
+    helpers=SimpleNamespace(**dict(vars(original),shared=shared))
     return FunctionType(function.__code__,dict(function.__globals__,st=st,ip=ip,pred=pred,cal=cal,
-        BRANCHES=ip.plan(a)['branches'],DOMAINS=DOMAINS,U=U,S=S,restored=restored),function.__name__,function.__defaults__)
+        BRANCHES=ip.plan(a)['branches'],DOMAINS=DOMAINS,U=U,S=S,restored=restored,original=helpers),function.__name__,function.__defaults__)
+
+
+def verify_map_record(record,response,mask):
+    if st.full_audit():return original.shared.verify_map_record(record,response,mask)
+    shape=(int(record['output_height']),int(record['output_width']))
+    if response.shape!=shape or mask.shape!=shape or response.dtype!=np.float32 or mask.dtype!=np.uint8:
+        raise ValueError('AUPRO map/GT geometry or dtype changed')
 
 
 def restored(a,domain):
-    value=bind(previous.restored,a)(a,domain)
+    path=a.run_root/'evaluation'/domain/'status.json'
+    if not path.exists():return None
+    value=st.sealed_json(path)
+    if value['identity']!=ip.identity(a) or value['prediction_seal']!=st.sealed_json(a.run_root/'predictions'/(domain+'.json'))['seal']:raise ValueError('CPU evaluation inputs changed')
+    for name,sha in value['files'].items():st.verify_file(path.parent/name,sha)
     if value and (value['domain']!=domain or value['images']!=len([s for s in ip.catalog(a)['samples'] if s['domain']==domain])
             or value['numerical_failed_checks']!=0):raise ValueError('incomplete CPU domain state')
     return value
@@ -74,7 +87,7 @@ def parent_proof(a,domain,records,branch):
     value=st.sealed_json(status_path)
     if value['numerical_failed_checks'] or value['images']!=len(records):raise ValueError('parent CPU result incomplete')
     for name,sha in value['files'].items():
-        if st.sha(status_path.parent/name)!=sha:raise ValueError('parent CPU result modified: '+name)
+        st.verify_file(status_path.parent/name,sha)
     old=[r for r in read_csv(status_path.parent/'map_manifest.csv') if r['branch']==branch]
     fields=('domain','sample_id','branch','output_height','output_width','map_float32_sha256','mask_uint8_sha256')
     if [[str(r[k]) for k in fields] for r in records]!=[[str(r[k]) for k in fields] for r in old]:return None

@@ -18,6 +18,8 @@ def calibration_states(a,domain):
 def validate_prediction(a,s,x,r,states):
     m=r['metadata'];n=int(np.prod(m['grid']))
     if m['identity']!=ip.identity(a) or m['sample']!=s or m['calibration_seals']!={b:v['seal'] for b,v in states.items()}:raise ValueError('prediction identity differs')
+    expected=getattr(a,'_prediction_record_seals',{}).get((s['domain'],s['sample_id']))
+    if expected is not None and expected!=r['seal']:raise ValueError('prediction metadata differs from frozen domain manifest')
     if not np.array_equal(np.sort(x['positions']),np.arange(n)):raise ValueError('physical position mapping differs')
     for b in ip.plan(a)['branches']:
         if x[b].shape!=(4,n) or x[b].dtype!=np.float32 or not np.isfinite(x[b]).all():raise ValueError('invalid complete calibrated output')
@@ -27,8 +29,21 @@ def validate_prediction(a,s,x,r,states):
 def verify(a):
     # Reuse exact global population/freeze checks, with independent globals.
     import sys
-    return FunctionType(_verify.__code__,dict(_verify.__globals__,ip=ip,st=st,DOMAINS=DOMAINS,CONFIG=ip.config(a),
-        calibration_states=calibration_states,prediction_path=prediction_path,validate_prediction=validate_prediction),_verify.__name__)(a)
+    if st.full_audit():
+        return FunctionType(_verify.__code__,dict(_verify.__globals__,ip=ip,st=st,DOMAINS=DOMAINS,CONFIG=ip.config(a),
+            calibration_states=calibration_states,prediction_path=prediction_path,validate_prediction=validate_prediction),_verify.__name__)(a)
+    # Domain manifests already commit exactly the validated per-image predictions.
+    # Check population/commit metadata here; read each payload only when consumed.
+    c=ip.catalog(a);cfg=ip.config(a);all_records=[];expected={}
+    for domain in DOMAINS:
+        rows=[s for s in c['samples'] if s['domain']==domain]
+        if [len(rows),sum(s['label']==0 for s in rows),sum(s['label']==1 for s in rows)]!=cfg['populations'][domain]:raise ValueError('incomplete frozen evaluation population')
+        if len({s['sample_id'] for s in rows})!=len(rows):raise ValueError('duplicate domain sample ID')
+        manifest=st.sealed_json(a.run_root/'predictions'/(domain+'.json'))
+        if manifest['identity']!=ip.identity(a) or [(r['domain'],r['sample_id']) for r in manifest['records']]!=[(domain,s['sample_id']) for s in rows]:raise ValueError('incomplete prediction population')
+        expected.update({(domain,r['sample_id']):r['seal'] for r in manifest['records']});all_records.append(manifest['seal'])
+    a._prediction_record_seals=expected
+    return st.digest(all_records)
 
 
 def predict(a):

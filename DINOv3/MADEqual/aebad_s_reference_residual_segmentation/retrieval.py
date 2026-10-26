@@ -61,6 +61,10 @@ def exact_with_audit(q,bank,device,*,search=None,key=None,query=None):
     from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation.model import exact
     distance,index=exact(q,bank,device) if search is None else search.exact(q if query is None else query,bank,key)
     if index.shape!=(len(q),) or (index<0).any() or (index>=len(bank)).any():raise ValueError('invalid exact reference row')
+    if not np.isfinite(distance).all():raise ValueError('nonfinite Exact distance')
+    if not st.full_audit():
+        return distance,index,dict(status='not_requested',scope='CPU_direct_vector_recomputation',audit_mode='fast',
+            stored_distance='original_FP32_cdist_not_replaced',unit='Euclidean/1280 once')
     maximum=0.;strict_failed=0;bound_failed=0
     # Direct original vectors audit; do not silently replace original cdist values.
     gamma=np.float64(16*q.shape[1]*np.finfo(np.float32).eps)
