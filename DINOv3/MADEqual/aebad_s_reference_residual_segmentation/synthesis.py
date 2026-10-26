@@ -2,7 +2,7 @@
 import numpy as np
 from scipy import ndimage
 from . import storage as st
-from .protocol import CONFIG,VERSION
+from .protocol import CONFIG,SYNTHESIS_VERSION as VERSION,resolve
 
 
 def area_resize(mask,shape):
@@ -104,14 +104,34 @@ def generate(before,donor,fg,origin,variant):
     return None,dict(status='invalid_retry_exhausted',kind=kind,scale=scale_name,attempts=CONFIG['retry_limit'],errors=errors)
 
 
-def manifest(c):
+def selected_variants(row,index,config):
+    """Original IDs, stratified before RGB/GT. Never renumber RNG inputs."""
+    target=row.get('support_index') is not None
+    if config['profile']=='full_v1':return list(range(config['target_versions' if target else 'source_versions']))
+    origin=row['relative_path'];shift=st.seed(origin)%3
+    if not target:
+        poisson=[v for v in range(8) if v%4 in (0,1) and (v+shift)%3==index%3]
+        p=min(poisson,key=lambda v:st.seed(VERSION,'compact_source_poisson',origin,v))
+        # Equal original-origin assignment; each alternative's two old IDs rotate.
+        other=(2 if index%2==0 else 3)+4*((index//2)%2)
+        return sorted((p,other))
     result=[]
-    for row in [r for r in c['source'] if not r['calibration']]+sum(c['supports'].values(),[]):
-        count=CONFIG['target_versions'] if row.get('support_index') is not None else CONFIG['source_versions']
+    for kind,count in (('poisson',8),('texture',4),('scratch',4)):
+        buckets={s:sorted([v for v in range(96) if CONFIG['synthesis_cycle'][v%4]==kind and (v+shift)%3==s],
+            key=lambda v:st.seed(VERSION,'compact_target',origin,v)) for s in range(3)}
+        offset=2 if kind=='texture' else 0
+        for i in range(count):result.append(buckets[(i+shift+offset)%3].pop(0))
+    return sorted(result)
+
+
+def manifest(c,config=None):
+    config=resolve() if config is None else config
+    result=[]
+    for index,row in enumerate([r for r in c['source'] if not r['calibration']]+sum(c['supports'].values(),[])):
         donors=[r for r in (c['supports'][row['domain']] if row.get('support_index') is not None else c['source'])
             if not r.get('calibration') and r['relative_path']!=row['relative_path']]
         if not donors:raise ValueError('no eligible normal donor')
-        for variant in range(count):
+        for variant in selected_variants(row,index,config):
             donor=sorted(donors,key=lambda r:st.seed(VERSION,'donor',row['relative_path'],variant,r['relative_path']))[0]
             result.append(dict(origin=row['relative_path'],variant=variant,donor=donor['relative_path'],
                 item_id=st.digest([row['relative_path'],variant])[:28],kind=CONFIG['synthesis_cycle'][variant%4]))

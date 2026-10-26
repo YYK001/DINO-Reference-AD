@@ -1,5 +1,62 @@
 # 参照残差分割学习：实现审计
 
+## 2026-10-26 compact_v1 修订（当前默认）
+
+本轮仅本地实现、CPU测试、文档和只读预检；未连接服务器、未安装依赖、未初始化CUDA、未启动真实前向/训练/评价，也未推送Git。下方原full审计保留历史背景，其中33模型/120行/42 AUPRO只适用于显式full_v1，不是当前默认。
+
+### 唯一运行配置与任务
+
+`protocol.resolve → inputs.freeze → resolved_config.json/job_plan.json → inputs.config/plan`。两个配置/清单seal进入inputs；拒绝固定profile内容冲突，任何阶段都不靠模块导入时的SEEDS/FAMILIES/BRANCHES选择运行。保留旧数学常量只是兼容旧full封装。compact默认1个Source REF预训练1000步、三域REF_ST各4000步、共4任务13000步；seed42；无控制/集成；主候选REF_ST_SEED42；三图×三域9个逻辑AUPRO，兼容基线实际复用数另报。固定组合不新增图。32行含CH1/CURRENT、macro及固定组合；单种子sample_std为NA，关闭分支not_requested不阻断完成。
+
+新建full显式选择，原6+27任务/三种子/集成保持。旧5091600full目录只有显式full才能打开；旧inputs/config/代码指纹精确识别后派生只读完整NN视图，不修改原身份/配置文件。不识别的旧代码或profile冲突拒绝。旧长日程中间checkpoint不能当作compact最终模型，当前目录恢复仍需池/日程/精度/输入和优化器/RNG一致。
+
+### 合成与采样变化的边界
+
+改变的是预算/固定子集，不改RGB生成算法。`SYNTHESIS_VERSION`沿用旧RNG前缀，运行profile另有版本。Source从0–7选一个Poisson及一个texture/scratch，按稳定清单交替228/227；Poisson尺度轮换。Target从0–95按8/4/4选16个，尺度6/5/5轮换。原variant、item、供体ID不重编号，生成种子/规则/标签定义保持。计划1294，实际valid/invalid及类型/尺度、normal_only按事实输出，未做隐藏补生成。
+
+无有效合成的个别原图保留全部正常监督；合成批从对应人口的有效原图均衡抽取，再选有效版本，保留Source/Target和正常/合成计划比例。任一所需人口整个无有效合成时，在准备两折库前明确失败。全有效时保留原full抽样随机调用和定义；full过去会被单原图无正样本阻断，现按本轮要求放宽为人口级条件，这项行为调整已明确列出。
+
+### 原始资产与只读兼容
+
+`reuse.py`按实际依赖判断，不使用预算identity一票否决：原始类型/完整网格、提取身份、原图/供体、生成规则/前景/RGB/标签、bank内容、几何、排除policy和NN物理行。新producer保存依赖签名；已登记5091600 producer通过旧代码指纹+固定依赖+内容记录证明。链接/新引用保留origin及原seal；Source/MAD/旧目录不改写。父MAD缺失仍可本轮校准，损坏父MAD拒绝。
+
+支持正式Source、完整normal/K8/calibration、两折bank、选中RGB/标签、tile及NN、原始Q和严格一致的基线地图/评价。未完成大池的已封存per-item RGB可独立导入。NN不全时，可以从独立已封存的原完整前向tile恢复消费位置的原始行；重叠必须逐位相同，不填造未消费位置，再按当前合法bank查NN。旧完整NN可按物理位置取行。缺依赖记录unconfirmed并准备缺项；损坏已存在记录拒绝，不重签。
+
+### 稀疏训练检索
+
+`tiles.physical_union/rows_for → training_data.prepare_one → source_nn/target_nn.positions → Dataset.load`。新RGB仍完整原宿主前向后裁tile，或复用已证明的旧完整前向tile；NN只查tile与halo去重并集，四层同位置。meta区分完整网格与实际NN数，显式映射物理ID到NN行；源/目标数组各自映射，不按全网格长度索引稀疏向量。正常图覆盖全网格时全查；正式926及66校准保持完整网格。稀疏查询改变GEMM行形状，真实CUDA仍待按原距离容差复核，不能由CPU一致性宣称GPU已验证。
+
+### 成本与smoke
+
+任务数/更新/计划槽位/分支/人口从同一plan派生，去除旧大配置硬编码。constructed固定输入只测计算/传输下界，不再把每步随机数生成等待混入；assets是实际父检索/前向，prepared按请求阶段/族读取真实Dataset。compact不展开NOREF、REF_SOURCE_QUERY、seed43/44或集成。按六阶段输出，当前有效池/实际稀疏几何、冷读/构库/评价未测时保留unknown，总时长不编造；已确认提交的工作从待办扣除。
+
+### 本轮新增检查（无容量准入）
+
+- 固定profile与resolved_config/job_plan封存、真实请求的模型/任务/完成行数；旧full默认compact拒绝，不自动迁移。
+- 合成原ID/供体/规则、实际前景/RGB/标签、原始类型与完整网格；人口级有效合成检查，保留normal-only原图。
+- 只读provider身份、旧producer代码依赖、数组SHA、折/排除/引用bank内容、tile重叠一致；原产物封存不变。
+- NN位置必须为整数、唯一、范围合法并覆盖消费位置；数组行数和冻结物理集合一致；不放宽数值容差。
+- 模型日程/实际池/初始化/精度/优化器/RNG检查；不把旧1000/2000更新状态当新1000更新完成。
+
+沿用原路径隔离、scratch私有清理、有限性、预测冻结后GT、像素中间结果封存及AUPRO身份检查。无RAM/VRAM/磁盘容量前置门槛、自动fallback、参数搜索、依赖安装、自定义Triton、服务器连接或关机。
+
+本轮实测结果见validation_results.json。CPU接入使用构造完整特征和小头，RGB宿主/训练模型来源有明确替身；AUPRO状态测试只验证报告逻辑，不执行替代AUPRO。实际服务器旧资产导入、CUDA稀疏NN、BF16、小池有效性、完整4模型训练及9逻辑AUPRO尚待review后人工验证。旧full smoke的用户日志不能当作新compact已通过。
+
+### 2026-10-27 最终验证记录
+
+- 三份测试文件合并执行：73/73通过，171.423秒，见`.tmp/reference_residual_tests/compact_final_validation.log`；含原full回归、compact CPU校准/预测/精确评价接入、稀疏NN与全量取行一致、正常监督保留、复用篡改识别、日程续跑及完成状态。
+- 23份Python文件编译通过；默认启动脚本`bash -n`通过；交付`compact_v1_plan.json`与实际resolver输出一致。
+- 默认只读预检：4训练任务/13000 updates/1294槽位/9定位任务；Torch未导入，实验目录未创建。缺权重、官方DINOv3源码及ADEval，未补装或运行真实资产。
+- 登记旧生成源码与新实现对固定构造Poisson/texture/scratch各一例的RGB、标签及诊断逐位一致。不是1294张真实池有效性或真实模型链路验证。
+- 新增检查限于配置/产物身份、合法映射、数据人口和请求完成性；完整列表见上方“本轮新增检查”。未增加容量准入门槛。
+
+实现与本地验证已具备独立review条件；未发布、未执行服务器smoke、未启动compact正式实验。
+
+---
+
+## 原 full_v1 实现审计与历史验证记录
+
+
 日期：2026-10-26。范围：独立本地实现、CPU构造数据验证、输入预检、服务器手动入口。没有连接服务器、运行真实DINO/构库/训练/CUDA/ADEval，未安装依赖。Git发布仅包含代码、测试、说明和固定身份元数据。历史方法和报告未修改。
 
 ## 方法边界及论文依据

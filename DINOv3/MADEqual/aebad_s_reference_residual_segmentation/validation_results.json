@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-26T17:10:05.409885",
+  "date": "2026-10-27",
   "status": "local_implementation_and_light_validation_complete_real_experiment_not_run",
   "tests": [
     {
@@ -73,10 +73,19 @@
       "seconds": 6.512,
       "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\execution_final_tests.log",
       "scope": "CPU_real_Exact_grouped_gradients_four_context_prepare_and_isolated_constructed_smoke"
+    },
+    {
+      "name": "compact_v1_final_and_full_v1_regression",
+      "tests": 73,
+      "passed": 73,
+      "skipped": 0,
+      "seconds": 171.423,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\compact_final_validation.log",
+      "scope": "constructed_CPU_only; actual_DINO_and_trained_head_provider_substituted_in_integration; AUPRO_report_fixture_only"
     }
   ],
   "python": "D:\\anaconda\\miniconda\\envs\\chinamoblie\\python.exe",
-  "compiled_Python_files": 21,
+  "compiled_Python_files": 23,
   "local_preflight": {
     "status": "blocked",
     "errors": [],
@@ -94,7 +103,7 @@
       "adeval"
     ],
     "torch_imported": false,
-    "experiment_directory_created": false,
+    "output_directory_created": false,
     "assets": [
       {
         "run": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\parent_metadata",
@@ -111,7 +120,8 @@
         "query_mode": "stream",
         "original_query_cache": "eligible only if full raw Q exists; z/distance/index are not features"
       }
-    ]
+    ],
+    "exit_code": 2
   },
   "original_metadata": {
     "Source": 521,
@@ -136,19 +146,18 @@
     "grouped_head_CPU_per_image_losses_and_gradients": true,
     "actual_four_context_training_preparation_CPU": true,
     "isolated_constructed_CPU_smoke": true,
-    "server_GPU_smoke_executed": false
+    "server_GPU_smoke_executed": false,
+    "new_3_branch_compact_calibration_prediction_and_exact_CPU_metrics": true
   },
   "pending": [
-    "remote original asset payload identities",
-    "real two-fold augmented Source sampler",
-    "actual foreground and synthesis pool quality",
-    "real full-grid extraction and retrieval",
-    "CUDA/BF16 numerics and throughput",
-    "33 full training jobs",
-    "66 domain-conditioned calibrations",
-    "926 formal predictions and exact evaluation",
-    "original ADEval CUDA AUPRO",
-    "actual RAM/VRAM/SSD/HDD cost"
+    "actual parent cache payload presence and content/extraction compatibility",
+    "real two-fold augmented Source sampler or compatible fold import",
+    "real compact selected synthesis validity and type/scale counts",
+    "real CUDA sparse-vs-full Exact original tolerance validation",
+    "CUDA/BF16 real Dataset throughput and 4 compact training jobs",
+    "66 domain-conditioned logit calibrations per requested model and 926 formal predictions",
+    "9 logical localization AUPRO jobs using original ADEval; baseline exact-map reuse when compatible",
+    "actual RAM/VRAM/SSD/HDD costs and measured pending-work duration"
   ],
   "server_connected": false,
   "dependencies_installed": false,
@@ -185,5 +194,48 @@
     "formal_updates_changed": false,
     "custom_Triton": false,
     "capacity_admission": false
+  },
+  "current_profile": "compact_v1",
+  "compact_revision": {
+    "date": "2026-10-27",
+    "default_profile": "compact_v1",
+    "source_jobs": 1,
+    "target_jobs": 3,
+    "planned_updates": 13000,
+    "planned_synthetic_slots": 1294,
+    "planned_slots_are_not_valid_samples": true,
+    "localization_jobs": 9,
+    "ensemble": false,
+    "primary": "REF_ST_SEED42",
+    "formal_evaluation_images": 926,
+    "not_requested": "NOREF_ST,REF_SOURCE_QUERY,seed43,seed44,ensembles",
+    "single_seed_sample_std": "NA",
+    "sparse_NN": "deduplicated physical tile+halo union; CPU production preparation and Dataset mapping tested",
+    "legacy_same_ID_generator_comparison": [
+      {
+        "variant": 0,
+        "kind": "poisson",
+        "status": "bitwise_equal_RGB_requested_soft_change_and_parameters"
+      },
+      {
+        "variant": 2,
+        "kind": "texture",
+        "status": "bitwise_equal_RGB_requested_soft_change_and_parameters"
+      },
+      {
+        "variant": 3,
+        "kind": "scratch",
+        "status": "bitwise_equal_RGB_requested_soft_change_and_parameters"
+      }
+    ],
+    "input_rules": "actual generation, extraction, bank, labels and geometry dependencies; run budgets ignored for raw assets",
+    "model_reuse": "pool/schedule/precision/optimizer/RNG must match; old long schedule intermediate is not compact final",
+    "full_v1_retained": true,
+    "legacy_full_profile_conflict_rejected": true,
+    "profile_snapshot_matches_resolver": true,
+    "server_smoke_executed": false,
+    "GPU_initialized": false,
+    "remote_connected": false,
+    "Git_pushed": false
   }
 }

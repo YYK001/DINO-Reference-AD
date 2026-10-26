@@ -3,12 +3,49 @@ from pathlib import Path
 from importlib.metadata import version,PackageNotFoundError
 from . import storage as st
 from .protocol import CONFIG,DOMAINS,LAYERS,VERSION
+from . import protocol
 from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation import inputs as previous
 from DINOv3.MADEqual.aebad_s_support_witness_segment_p0 import fresh_inputs as fi
 
 ROOT=Path(__file__).resolve().parents[3]
 def catalog(a):return st.sealed_json(a.run_root/'catalog.json')['catalog']
 def identity(a):return st.sealed_json(a.run_root/'inputs.json')['identity']
+def legacy(a):
+    p=a.run_root/'inputs.json'
+    if not p.exists():return False
+    value=st.sealed_json(p)
+    return value.get('config')==CONFIG and 'resolved_config_seal' not in value
+
+
+def config(a):
+    requested=getattr(a,'profile',protocol.DEFAULT_PROFILE);p=a.run_root/'resolved_config.json'
+    if p.exists():
+        value=st.sealed_json(p)['config']
+        if value['profile']!=requested:raise ValueError('frozen profile differs; new output directory required')
+        if value!=protocol.resolve(requested):raise ValueError('fixed profile configuration differs from implementation')
+        return value
+    old=a.run_root/'inputs.json'
+    if old.exists():
+        value=st.sealed_json(old)
+        if 'resolved_config_seal' in value:raise ValueError('missing frozen resolved_config.json')
+        if value.get('config')==CONFIG:
+            if requested!='full_v1':raise ValueError('legacy full_v1 requires explicit --profile full_v1; never migrated to compact')
+            known=st.read_json(Path(__file__).with_name('legacy_full_v1_compatibility.json'))['code']
+            prefix='DINOv3/MADEqual/aebad_s_reference_residual_segmentation/'
+            saved={Path(k).name:v for k,v in value.get('code',{}).items() if k.startswith(prefix) and k.endswith('.py')}
+            if saved!=known:raise ValueError('legacy full_v1 code provenance unknown; original implementation required')
+            result=protocol.resolve('full_v1');result['training_nn_layout']='complete_grid_v1';return result
+    return protocol.resolve(requested)
+
+
+def plan(a):
+    cfg=config(a);expected=protocol.job_plan(cfg);p=a.run_root/'job_plan.json'
+    if p.exists():
+        saved=st.sealed_json(p)['plan']
+        if saved!=expected:raise ValueError('frozen job plan differs')
+        return saved
+    if (a.run_root/'resolved_config.json').exists() and (a.run_root/'inputs.json').exists():raise ValueError('missing frozen job_plan.json')
+    return expected
 def key(row):return st.digest(row['relative_path'])[:24]
 def normal_path(a,row):return a.cache_root/'normal_features'/key(row)
 def item_path(a,item):return a.cache_root/'training_queries'/item['item_id']
@@ -64,7 +101,11 @@ def recent(path):
     p=Path(path)
     if (p/'inputs.json').exists() and (p/'catalog.json').exists():
         value=st.sealed_json(p/'inputs.json');c=st.sealed_json(p/'catalog.json')['catalog']
-        if value['configuration']['version']!='normal_correspondence_residual_v1':raise ValueError('not an original correspondence raw asset schema')
+        if value.get('config',{}).get('version')==VERSION:
+            if value['catalog']!=st.digest(c):raise ValueError('recent residual catalog differs')
+            fi.validate_catalog(c);validate_frozen_origins(c)
+            return dict(kind='reference_residual',run=p,cache=Path(value['cache']),catalog=c,identity=value['identity'],inputs=value)
+        if value.get('configuration',{}).get('version')!='normal_correspondence_residual_v1':raise ValueError('not an original raw asset schema')
         if value['catalog']!=st.digest(c):raise ValueError('recent catalog differs')
         fi.validate_catalog(c)
         validate_frozen_origins(c)
@@ -81,15 +122,51 @@ def raw_manifest(path):
     return r
 
 
+def work_inventory(a):
+    cfg=config(a);jobs=plan(a);result=dict(planned_slots=jobs['planned_synthetic_slots'],requested_updates=jobs['planned_updates'],completed_training_jobs=[])
+    for j in jobs['training_jobs']:
+        p=a.run_root/'models'/j['phase']/j['family']/f"seed{j['seed']}"/'complete.json'
+        if p.exists():
+            r=st.sealed_json(p)
+            if r['inputs']['identity']==identity(a) and r['updates']==j['updates']:result['completed_training_jobs'].append((j['phase'],j['family'],j['seed']))
+    if not (a.run_root/'catalog.json').exists():return result
+    c=catalog(a);normal=c['source']+sum(c['supports'].values(),[])
+    result['normal_feature_forwards_remaining']=sum(not (normal_path(a,r)/'manifest.json').exists() for r in normal)
+    synth=a.run_root/'synthetic_manifest.json'
+    if synth.exists():
+        rows=[r for r in st.sealed_json(synth)['items'] if r['status']=='valid'];result['effective_synthetic_samples']=len(rows)
+        result['synthetic_forwards_remaining']=sum(not (a.cache_root/'training_queries'/r['item_id']/'complete.json').exists() for r in rows)
+    remaining=0
+    for d in DOMAINS:
+        remaining+=sum(not (a.cache_root/'calibration_NN'/d/f'{i:03d}'/'manifest.json').exists() for i in range(1,sum(r['calibration'] for r in c['source'])+1))
+        remaining+=sum(not (a.cache_root/'predictions'/d/r['sample_id']/'manifest.json').exists() for r in c['samples'] if r['domain']==d)
+    result['full_grid_calibration_prediction_NN_remaining']=remaining
+    result['inventory_scope']='committed current-run metadata, not unverified parent candidates'
+    return result
+
+
 def preflight(a):
     missing=[];errors=[];assets=[]
+    try:cfg=config(a);jobs=plan(a)
+    except (ValueError,OSError,KeyError) as e:return dict(status='blocked',errors=[str(e)],missing_inputs=[],torch_imported='torch' in __import__('sys').modules)
     for name,p in [('data',a.data),('checkpoint',a.checkpoint),('host',a.official_root/'config.json'),('backbone',a.dinov3_root/'hubconf.py')]:
         if not p.exists():missing.append(dict(asset=name,path=str(p)))
     for path in a.recent_run:
         try:
             r=recent(path);base=r['cache'];c=r['catalog']
             assets.append(dict(run=str(path),status='found_metadata; compatibility_and_payload_checked_in_prepare',kind=r['kind'],
-                original_bank_present=(base/('source_original/manifest.json' if r['kind']=='correspondence' else 'source_bank.npz')).exists()))
+                original_bank_present=(base/('source_original/manifest.json' if r['kind'] in ('correspondence','reference_residual') else 'source_bank.npz')).exists()))
+            if r['kind']=='reference_residual':
+                from .synthesis import manifest
+                selected=manifest(c,cfg)
+                assets.append(dict(run=str(path),normal_features='reuse compatible original complete grids by content/extraction identity',
+                    complete_normal_candidates=sum((base/'normal_features'/key(row)/'manifest.json').exists() for row in c['source']+sum(c['supports'].values(),[])),
+                    fold_banks={f:(base/'source_folds'/('fold_'+f)/'manifest.json').exists() for f in ('A','B')},
+                    selected_synthesis='inspect selected original IDs only, including interrupted per-item pool',
+                    selected_RGB_candidates=sum((base/'synthetic_rgb'/v['item_id']/'manifest.json').exists() for v in selected),
+                    selected_training_candidates=sum((base/'training_queries'/v['item_id']/'complete.json').exists() for v in selected),
+                    tiles_and_NN='conditional on RGB/label/geometry/reference dependencies; full NN may be subsetted',
+                    models='not reused across different schedules/pools',status='payloads_and_compatibility_not_verified_in_preflight'))
             if r['kind']=='correspondence':
                 counts=dict(Source_training_complete=0,Source_calibration_complete=0,Target_complete=0,Source_sampled_only=0)
                 for row in c['source']+sum(c['supports'].values(),[]):
@@ -112,32 +189,45 @@ def preflight(a):
     if dependencies['adeval'] not in (None,'1.1.0'):errors.append('ADEval==1.1.0 required')
     return dict(status='blocked' if missing or errors or absent else 'inventory_ready_not_runtime_verified',
         missing_inputs=missing,errors=errors,missing_dependencies=absent,dependency_versions=dependencies,assets=assets,
-        config=CONFIG,torch_imported='torch' in __import__('sys').modules,
+        config=cfg,job_plan=jobs,torch_imported='torch' in __import__('sys').modules,
         new_computation=['two opposite-Source-fold original-sampler 100K training banks',
-            '3640 Source + 2304 Target fixed RGB synthetic slots, each effective RGB forwarded ONCE',
-            'original full-grid feature retrieval and halo tiles shared by all seeds/controls',
-            'six Source-pretraining + 27 domain-training heads; independent logit calibration'],
+            f"{jobs['planned_synthetic_slots']} planned selected RGB slots; compatible cached slots/grids/NN imported, no hidden fill",
+            'training tile+halo union Exact; full normal grids when actually covered; full-grid calibration/test unchanged',
+            f"{jobs['source_jobs']} Source + {jobs['target_jobs']} target heads; {jobs['planned_updates']} updates; requested logit calibration only"],
         may_repeat=['455 full Source normal grids: old 2048 samples insufficient',
             '926 raw Q when old stream captures lack vectors'],
+        reuse_decisions=dict(reuse='only compatibility-verified originals/selected RGB/labels/tiles/NN; see assets candidates',
+            new='requested missing synthetic items, NN positions and training jobs only',
+            repeat='missing full original grids and stream-mode test Q; never inferred from distances',
+            unconfirmed='candidate existence does not prove payload/extraction/rule compatibility; verified at prepare/first consumption'),
         scale_estimates=dict(assumption='13924 cells and 1280 FP32 channels, not measured; no resource admission',
-            synthetic_slots=5944,normal_training_images=479,full_grid_bytes_per_image=13924*1280*4*4,
-            all_training_full_grid_bytes=6423*13924*1280*4*4,
+            synthetic_slots=jobs['planned_synthetic_slots'],normal_training_images=cfg['Source_training']+len(DOMAINS)*8,full_grid_bytes_per_image=13924*1280*4*4,
+            all_training_full_grid_bytes=(jobs['planned_synthetic_slots']+cfg['Source_training']+len(DOMAINS)*8)*13924*1280*4*4,
             maximum_tile_bytes_four_layers=(CONFIG['tile_center']+2*CONFIG['halo'])**2*1280*4*4,
             tile_count='measured per actual mask; positive-covering tiles plus fixed normal tiles',
             optional_full_926_query_bytes=926*13924*1280*4*4))
 
 
 def freeze(a,c,extraction):
+    cfg=config(a);jobs=protocol.job_plan(cfg)
+    if legacy(a):
+        old=st.sealed_json(a.run_root/'inputs.json')
+        if old['catalog']!=st.digest(c) or old['extraction']!=extraction:raise ValueError('legacy full_v1 inputs changed; no migration')
+        return old
     fi.validate_catalog(c);validate_frozen_origins(c);st.sealed_json(a.run_root/'catalog.json',dict(catalog=c))
-    st.sealed_json(a.run_root/'protocol.json',dict(CONFIG))
+    st.sealed_json(a.run_root/'protocol.json',dict(cfg))
+    resolved=st.sealed_json(a.run_root/'resolved_config.json',dict(config=cfg))
+    planned=st.sealed_json(a.run_root/'job_plan.json',dict(plan=jobs))
     shared=['DINOv3/relation_reliability/superadd_host.py','DINOv3/relation_reliability/calibration.py','DINOv3/relation_reliability/official_metrics.py',
         'external_baselines/superadd_external/memory_variants.py','DINOv3/ShiftADD/aebad_s_p0/memory.py',
         'DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/calibration.py','DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/model.py',
         'DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/evaluation.py','DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/training.py',
+        'DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/storage.py','DINOv3/MADEqual/aebad_s_support_witness_segment_p0/storage.py',
         'DINOv3/MADEqual/aebad_s_support_witness_segment_p0/evaluation.py','DINOv3/MADEqual/aebad_s_projection_layer_diagnostic/metrics.py',
         'DINOv3/MADEqual/aebad_s_projection_layer_diagnostic/numerics.py','DINOv3/MADEqual/aebad_s_ch1_scoring_inheritance/scoring.py',
         'DINOv3/MADEqual/aebad_s_segment_pair_crossdomain_p0/analysis.py','DINOv3/MADEqual/aebad_s_target_local_segment/geometry.py']
-    code={p.relative_to(ROOT).as_posix():st.sha(p) for p in list(Path(__file__).parent.glob('*.py'))+[Path(__file__).with_name('frozen_origins.json')]+[ROOT/p for p in shared]}
-    value=dict(config=CONFIG,catalog=st.digest(c),cache=str(a.cache_root),query_mode=a.query_mode,
-        extraction=extraction,code=code)
+    code={p.relative_to(ROOT).as_posix():st.sha(p) for p in list(Path(__file__).parent.glob('*.py'))+[Path(__file__).with_name('frozen_origins.json'),Path(__file__).with_name('legacy_full_v1_compatibility.json')]+[ROOT/p for p in shared]}
+    from .reuse import rules
+    value=dict(config=cfg,catalog=st.digest(c),cache=str(a.cache_root),query_mode=a.query_mode,
+        extraction=extraction,code=code,resolved_config_seal=resolved['seal'],job_plan_seal=planned['seal'],artifact_rules=rules(cfg))
     value['identity']=st.digest(value);return st.sealed_json(a.run_root/'inputs.json',value)

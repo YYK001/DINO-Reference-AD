@@ -1,167 +1,139 @@
 # 真实 Target-normal 支持下的参照残差分割学习
 
-这是待验证的独立候选，借鉴参照残差、正常内容局部合成和少样本正常参照机制。不是 ResAD、MemSeg、NSA 或 InCTRL 的官方复现。当前交付限于本地实现、小型 CPU 验证与手动入口；尚无真实训练或新检测结果。
+本工具保持同一套方法实现，新增运行预算 `compact_v1`，作为新建实验默认值。原完整预算保留为显式 `full_v1`。本轮只完成本地代码、CPU测试与说明，不连接服务器、不提取真实特征、不启动训练或GPU评价。新compact的效果和CUDA稀疏检索尚未验证。
 
-## 冻结配置与主要对照
+## 两种固定预算
 
-`protocol.py:CONFIG` 是第一版固定配置，CLI 不提供训练步数、损失权重或网络结构搜索。原 DINOv3 ViT-H+/16、完整视野切窗/拼接和提取精度不变。四层 L7/L15/L23/L31、1280维 FP32 特征，Exact FP32 Euclidean/1280 **一次**。正式 Source 每层100K、完整 K8 Target、原 Source 距离 MAD、原插值和 CH1 基线不变。
+|配置|compact_v1（默认）|full_v1（显式）|
+|---|---:|---:|
+|训练种子|42|42、43、44|
+|训练族|REF_ST|REF_ST、NOREF_ST、REF_SOURCE_QUERY|
+|每张Source合成槽|2|8|
+|每张Target合成槽|16|96|
+|计划合成总槽|1294=455×2+24×16|5944=455×8+24×96|
+|Source预训练|1个×1000更新|6个×2000更新|
+|目标域训练|3个×4000更新|27个×12000更新|
+|计划更新总数|13000|336000|
+|集成|不请求|3个族各三成员z集成|
+|主候选|REF_ST_SEED42|REF_ST_ENSEMBLE|
+|定位图分支数|3|14|
+|三域定位图/AUPRO逻辑作业|9|42|
 
-原521张 Source 按原路径排序，index%8==0 的66张只校准，另外455张训练/构库。原 seed42 支持名单及顺序不重采样。评价为 background 297（85/212）、illumination 265（67/198）、view 364（84/280），总926张，排除各域原8张支持，不用878共同子集。
+compact定位图只有 `UNION_K8`、`SEGMENT_K8`、`REF_ST_SEED42`。`SEGMENT_SCORE_UNION_MAP`保持既定SEGMENT图像评分与UNION定位指标的组合，不生成新图，不增加AUPRO。关闭的控制、种子和集成为 `not_requested`，不会成为pending或完成条件。CH1为主图像评分，CURRENT为补充，二者共享像素评价。compact完整表为32行（含三域等权macro及固定组合），full为120行。
 
-`frozen_origins.json`从已封存correspondence目录清单提取原521张Source及background的图像身份、尺寸、名单和K8顺序，并固定全部926张的GT文件身份，仅含元数据/哈希，不解码GT；illumination/view图像清单继续核对原共享`frozen_catalog.json`。不是只检查数量，也不把用户换过的同名图片或GT当作原数据。
+`protocol.resolve(profile)`是唯一运行配置入口，`protocol.job_plan(config)`派生实际任务；`inputs.config/plan`加载已冻结版本。新prepare分别封存 `resolved_config.json`、`job_plan.json`，并将两者seal纳入inputs身份。各阶段按同一清单选择模型/分支/更新数。`protocol.CONFIG`及旧SEEDS等名称仅保留作旧full记录和共同数学常量的兼容模板，运行不能靠修改这些全局量选择分支。静态 `compact_v1_plan.json`由同一解析器生成，供review，不是另一份执行配置。
 
-|分支族|训练查询|参照输入|Source初始化|
-|---|---|---|---|
-|REF_ST|目标阶段Source/Target各半|查询、Source/Target残差向量与3个距离标量|对应种子REF预训练|
-|NOREF_ST|与REF_ST相同样本和日程|只读查询；其他输入置零，不访问NN缓存|独立NOREF预训练|
-|REF_SOURCE_QUERY|目标阶段全部Source|仍有该域K8条件，不是严格source-only|共用REF_ST对应种子预训练|
+## 保持的方法定义
 
-每族训练42/43/44三个种子，均使用最终checkpoint。三个成员独立logit校准后逐层平均z，另拟合集成image MAD，不再拟合patch MAD。主候选为 `REF_ST_ENSEMBLE`。正式保存14套定位图：UNION/SEGMENT、9单模型、3集成。额外 `SEGMENT_SCORE_UNION_MAP` 只组合既定SEGMENT图像指标与UNION像素指标，不能算新预测器。
+- Source原521张按路径排序，index%8==0的66张只用于校准，其余455张训练/构库。三域仍为background 297（85正常/212异常）、illumination 265（67/198）、view 364（84/280），共926张，固定seed42 K8及顺序、支持排除均不变。
+- 原DINOv3 ViT-H+/16完整视野/切窗/拼接、原预处理与提取精度不变。L7/L15/L23/L31、1280维FP32原始特征；正式Source每层100K、原亮度增强与原100轮距离采样；Exact FP32 Euclidean/1280一次。
+- Source训练原图及派生均只查对折训练参照：稳定交替A/B为228/227张，每折按原采样器构成100K/layer。Source预训练模拟7/8张对折正常支持；目标阶段Source查询采用域K8。Target训练原图及派生使用正式Source与其余K7，正式测试及66张校准使用完整K8。
+- 每层输入是 `(q-mu)/sigma`、`(q-s*)/sigma`、`(q-t*)/sigma`和Source距离MAD标准化的ds/dt/min。mu为正式原库通道均值，sigma为全通道中心RMS，无每patch L2归一化。NoRef只有显式full请求时存在，只读查询并置零其他通道，不访问NN或距离MAD。
+- 原四层头，1×1到128通道、逐位置LayerNorm/GELU、两个dilation1/2局部残差块、1×1输出logit；无全图空间归一化。中心16×16、halo4，不改变卷积/插值依赖。
+- batch4、正常/合成1:1；REF_ST/NOREF_ST目标阶段Source/Target各半。四层逐图正负平衡BCE均值＋融合logit同类BCE＋0.5 soft Dice；正常图Dice为0。AdamW 3e-4、wd1e-4、梯度裁剪1，5%warmup后cosine到1e-6；按本次1000/4000或2000/12000总更新数计算，不截取旧长日程中间模型冒充完成。
+- 头训练BF16、损失FP32；头推理FP32并保持CuDNN启用状态；骨干精度保持原宿主配置，FP64只用于小规模统计/误差核查。无自定义Triton。
+- 新logit仍用每域K8条件下未训练的66张Source独立校准patch/image MAD，不套旧距离MAD；常数/近零尺度仍失败。Source-only距离MAD与新logit校准分离。原融合、插值、CH1/CURRENT、GT映射、精确CPU像素排序和原ADEval1.1.0/200阈值/FPR≤0.3保持。
 
-## 自排除、输入与网络
+## compact合成选择与无有效版本的原图
 
-- Target原图或同源合成查询：正式Source + 其余7张Target。正式测试与66张校准查询：正式Source + 全K8。
-- Source训练查询：455张按稳定列表交替A/B，228/227张；查询A只用B构成的训练专用100K/layer库，反之亦然。所有派生样本继承原图组。两折库重新调用原亮度增强和原100轮距离采样，保存候选行、原图索引、patch索引。它们不替换正式Source。
-- Source预训练模拟7或8张支持：通过固定SHA/PCG规则，从查询的**对折**Source正常图选取，排除原图和所有派生版本；进入目标阶段后改用该域固定K8。
+合成算法版本独立于运行profile：`SYNTHESIS_VERSION`保留原 `reference_residual_segmentation_v1` RNG前缀；原生成种子、供体SHA排序、variant ID和item ID不变。compact从旧Source 0–7、Target 0–95选分层子集，不重编号。
 
-检索使用原始向量；每层输入为 `(q-mu)/sigma`、`(q-s*)/sigma`、`(q-t*)/sigma`，以及按原Source距离MAD标准化的 `ds,dt,min(ds,dt)`。mu为正式原Source库通道均值，sigma为全通道中心RMS。没有每patch L2归一化。最近邻索引保留，并用对应原始行的残差范数核查距离；不把向量输入标准化当作检索变换。
+Source每张1个Poisson＋1个texture/scratch，后者按稳定455图清单交替（228/227）。Poisson目标尺度按清单轮换，保留小/中/大覆盖。Target每张8 Poisson、4 texture、4 scratch，按原尺度分层，单张总尺度数为轮换的6/5/5。供体只来自训练Source或同域其他正常Target，排除原图、校准、测试和跨域Target。选择不读取GT或指标。
 
-四层各自1×1→128，逐位置通道LayerNorm+GELU，两个局部残差块（3×3，dilation1/2），1×1→1 raw logit。无整图空间归一化，不更新DINO/memory，不引入Adapter、OT或SEGMENT门控。
+前景、Poisson/texture/scratch、尺寸范围、4次有限重试、实际RGB变化和soft标签规则均保留：Source PC1＋中心定向/Otsu/最大连通域，面积5%–85%，放置至少80%落在辅助前景；变化至少2/255，soft变化/.1截断并用面积覆盖映射。没有新增补生成或把无变化位置标为异常。
 
-## 固定合成池与tile监督
+1294仅为计划数。`synthetic_type_scale_counts.csv`记录域×类型×尺度×实际状态，`synthetic_origin_summary.csv`逐图记录planned/valid/normal_only。某图没有有效合成时保留其正常版本；合成batch从对应人口的有效合成原图中均衡选原图，再选有效版本。正常batch仍覆盖全部原图，Source/Target与正常/合成的计划比例不变。若Source或某域整个所需人口无有效合成，prepare-training在构库前停止，保留说明，不硬造标签、不无限换种子补齐。
 
-455×8 + 24×96 = **5944个固定合成槽位**，加479张完整正常版本。名义类型比例1/2正常内容Poisson移植、1/4正常纹理/结构扰动、1/4窄划痕。小/中/大尺寸分别为原RGB短边的[.01,.025]、[.04,.10]、[.12,.25]，最小局部边8px；划痕宽1–3px。具体参数、供体、位置、重试与无效原因均记录。没有DTD或真实异常供体。
+## 训练NN只检索消费的位置
 
-前景辅助由原Source库L31的固定PC1近似、中心定向、Otsu及最大连通区域产生，面积仅接受5%–85%；不是GT。合成位置要求至少80%落在该估计中，不能获取时明确无效，不退回全图。每槽最多4次尝试。Poisson仅提交声明局部区域内的RGB修改；保存生成区域、实际RGB最大变化与软标签。最大变化至少2/255才有效，软标签按RGB平均变化/.1截到1，再用精确面积覆盖重采样到原评价尺寸。没有中值滤波或小区域清除。极小Poisson槽可能无有效变化，保留无效记录；若某原图完全没有有效合成版本，准备阶段明确失败，不静默删去该图。
+新建compact和full均采用 `physical_tile_union_v1`：实际合成RGB仍先做一次完整原宿主前向，随后由已冻结标签确定tile/halo，将所有所需物理patch取去重并集，四层按同一物理位置查Exact。`source_nn/target_nn`显式保存positions，complete记录完整网格大小、NN位置与数量。Dataset通过物理ID到NN行的查表取值，拒绝缺位置/重复/越界/行数不符，不把稀疏数组当全网格。
 
-每个有效合成RGB必须真实完整视野前向一次，随后才从原生特征裁tile。中心16×16，卷积半径3，再为插值增加一圈，**halo4**、最大24×24。保留覆盖所有正区域的中心块及至多4个固定正常中心块；完整正常图的中心块覆盖全部网格。合成tile以1:1正/正常块概率选择（某类不存在时使用存在的类别），原图均衡。损失在全局半像素映射对应的原输出像素窗口计算，小区域不会被硬下采样为零。标签处理独立于正式GT映射。
+正常图训练tile覆盖完整网格时照实全查，不宣称缩减。正式926张和66张校准仍使用完整网格。`training_query_resources.csv`记录每项完整patch数、实际NN数及复用来源，位置减少不当作已测加速比。
 
-训练：有效batch4图，正常/合成1:1；REF_ST/NOREF_ST目标阶段Source/Target1:1。Source预训练2000更新×6模型，目标12000×27模型，共336000更新。AdamW3e-4、wd1e-4、5%warmup+cosine至1e-6、clip1。损失为四层分别正负面积归一化BCE的均值 + 四层平均logit的同类BCE + .5融合soft Dice。正常图Dice=0。每图独立归一化，避免大缺陷图支配batch。
+## 只读资产复用
 
-原始特征、残差、NN、损失FP32；头训练CUDA BF16，头推理FP32且关闭其TF32，显式保留CuDNN的启用/benchmark/deterministic设置，退出后恢复骨干设置。骨干沿用父实验精度/设置，不因新头改变提取配置。FP64仅小型RMS统计和误差界统计。没有自定义Triton、编译器安装或额外CUDA扩展。
+通过可重复 `--recent-run`或原始 `raw_assets.json`指定来源；不扫描已丢失AutoDL。已停止的本工具full运行也可作为只读父资产，允许在全合成池尚未完成时导入已封存的选中项。
 
-## 资产复用与重复工作
+|资产|相容判断与处理|
+|---|---|
+|正式原Source bank|原始类型、Source图像/提取身份、prepared source seal及数组SHA；链接原始L层，不读adapted bank|
+|两折训练bank|相同训练原图/顺序/折、增强、采样器/预算/种子、提取设置及内容；训练步数/seed数量不影响它|
+|完整正常/支持/校准特征|原始完整网格、图像身份、层/dtype/positions和内容；2048抽样不能替代|
+|选中RGB/标签|原ID、供体、图像、固定生成规则/种子、实际前景及RGB/标签SHA；不改旧manifest|
+|原始训练tile|RGB/提取/标签/几何依赖一致；直接链接。NN缺失时可从已封存原完整前向的tile恢复所需原始行并只补NN，重叠行必须逐位一致；不伪造未消费位置|
+|NN|同时核对实际Source/Target内容、K7/K8/对折排除、位置/标签/几何；旧完整NN直接按物理位置取行，不能只凭run ID相同|
+|原始Q|原完整q层与positions，不能从距离/索引恢复；父stream未保存Q时需再前向|
+|UNION/SEGMENT|与本轮同库/MAD下距离复核，像素指标还须逐图map/GT SHA和完整名单一致；不相容则本轮计算|
+|模型/优化器|不自动跨profile导入。当前目录的池、日程、精度、输入身份及完整checkpoint必须完全匹配；旧2000步日程的第1000步不是新1000步日程最终模型|
 
-只读取显式 `--recent-run`（可重复）或新工具导出的 `--asset-manifest raw_assets.json`。不扫描旧AutoDL目录。
+新产物保存 `origin/origin_seal`等只读引用，不给旧产物重签为新身份。新版依赖签名忽略与该资产无关的训练预算；5091600旧full只在已记录实现、固定依赖和实际内容通过时接受。缺少证明记录为unconfirmed/重复项，不用名称猜相容。详见 `reuse_audit.json`、`reuse/*.csv`及各manifest。
 
-|资产|兼容后处理|不能复用/新增的原因|
-|---|---|---|
-|近期correspondence `source_original`|冻结Source seal、软件、宿主代码、权重和图像清单一致后链接|不读transformed memory或Adapter|
-|24 Target、66 Source校准完整特征|只链接`full_L*`和`full_positions`|每图2048抽样行不是完整网格|
-|455 Source完整正常特征|存在完整原始资产则复用，否则新增完整前向|旧correspondence只保留2048抽样，需要补提取|
-|原始正式Q|correspondence disk-Q或显式raw manifest验证后读全向量|stream仅距离/索引不能反推Q；926张可能要再提取|
-|UNION/SEGMENT z、原距离MAD|必须与同一正式原Source/支持/提取设置相容|不相容则在当前共同原库重算基线，历史结果不拼接|
+父距离MAD缺失时，用当前共同原Source与原66图校准；存在但封存损坏时仍拒绝。两个阶段不改父校准。新建compact绝不覆盖旧full。
 
-|基线像素/AUPRO指标|重建的逐图map、GT SHA和完整名单与封存父评价完全相同才复用|校验不一致则计算本轮指标，不放宽容差|
-|两折训练参照|新增，原增强/采样规则|用于严格同源排除，正式Source未被替换|
-|5944合成槽位及NN/tile|新增一次，全族全种子共享|不能修改正常特征假装合成RGB前向|
+## 阶段、默认命令与旧full
 
-复用 correspondence 原 Source 库不要求父运行已完成校准。父 `calibration/source/UNION_K8.json` 缺失时，准备完整正常特征后，用本轮共同原库及原66张 Source 校准图执行已有距离校准，保存为本轮 `input_distance_mad.json`，不写入父目录，也不创建父校准复用记录。父文件存在时仍须通过原封存校验，损坏、不可读或无效链接直接报错，不以重新校准掩盖。已封存的本轮校准在续跑时继续复用；网络 logit 校准仍独立进行。
+默认stage仍为只读 `preflight`，不导入Torch/初始化CUDA/生成结果目录；展示解析配置、实际任务、复用候选/新增/确需重复/无法确认项。只读候选存在不等于内容已通过校验。实际操作由显式prepare开始。
 
-correspondence、迁移后的WITNESS/fixed-graph schema分别识别；legacy距离/端点文件不冒充完整Q。兼容性包括提取依赖而不是要求旧图算法代码身份等于新分析代码。原始产物seal不修改，新工具自己的输入身份单独冻结。历史小review包只有报告，不能当成上述大缓存。
+默认顺序：`prepare → synthesize → prepare-training → train-source → train-target → calibrate → predict → evaluate → evaluate-aupro → summarize`。`all`只执行当前profile清单，不自动追加消融、其他seed或集成。末尾review按允许类型打包，剪除大cache、scratch、NPY/PT/BIN，无关机或依赖安装。
 
-`preflight`只读文件/元数据，列出缺项、元数据可用与待prepare验证的状态，不把“存在”写成“已通过运行”。实际兼容、SHA和数值核查在显式计算阶段按需完成。
-
-## 存储和计算成本
-
-不能沿用旧方法100GB估计。以118×118、1280维、FP32为例：
-
-- 单图完整四层约272MiB；6423张训练查询全部留全网格约1.67TiB（本实现**不**保存全部合成全网格）。
-- 545张原始正常完整网格逻辑大小约145GiB，其中兼容的90张可链接，实际新增455张约121GiB。
-- 单个最大24×24四层tile约11.25MiB；每个合成图保留的tile数取决于实际软标签，规模按实记录，不能预填总容量。
-- 两折库合计约3.8GiB；原增强候选临时spool逐折约61GiB。100轮采样只将当前层（估计15GiB）顺序复制到`--sampling-scratch`的SSD私有目录，用完即清除；不反复随机读取HDD大候选。真实字节见`source_fold_resources.csv`。
-- 还需合成RGB、原尺寸生成区域/变化图、输出软标签、NN索引、预测与checkpoint。实际总缓存可能达**数百GB甚至更高**，不能保证100GB够用。
-- stream模式不保存926张完整Q；disk模式另约246GiB。查询/候选/memory完整距离矩阵不落盘。
-- 单头3,152,388参数，纯FP32参数约12MiB；训练checkpoint还含Adam/RNG状态。Source6+目标27个最终模型，不按layer拆成132个训练作业。
-
-大缓存放机械盘指定根，代码/日志/模型放SSD；采样与精确评价的scratch分别独立指定SSD，脚本默认分别为`/home/ubun/YYK/tmp/${tag}_sampling`和`/home/ubun/YYK/tmp/${tag}`，不同时堆积四层SSD候选。若正式原库也缺失，其旧上游构库器仍使用HDD spool。每个域仅处理该域定位图，最多8个CPU图像任务。一次训练缓存预取与GPU重叠；不逐loss读取GPU标量，日志每100更新一次，checkpoint每200。必要的非有限损失/梯度检查仍有同步。未在真实GPU计时，不承诺训练总小时数或加速比。
-
-## 执行优化与独立 smoke
-
-- `execution.ResidentExact` 为带 seal/layer 键的有界参照张量 LRU，默认4GiB，可通过 `--reference-cache-gib` 调整，0表示不留存参照张量。预算仅限制本进程缓存，不检查机器是否有足够空闲容量，不自动降级或占用第二张卡。矩阵、骨干及分配器缓存另占显存，4GiB不是进程显存上限。
-- Exact仍调用原 `_exact_top1_chunked`，保留原FP32 `torch.cdist`、分块、逐支持顺序和单位。每张训练查询逐层上传Q一次，共享Source与四种条件的检索；正式预测/校准同样复用查询和常驻参照。没有近似NN、TF32或自定义Triton。
-- 训练按索引直接从各支持mmap取tile需要的行，不为每个随机支持组合拼接整套完整K7/K8。排除policy按原图和阶段记忆化；每个读取的NN/参照仍核对封存身份。训练形状相同的tile合批，不补零或换tile；逐图插值、逐图loss、每图1/4权重和固定抽样保持。合批改变浮点归约次序，不承诺旧执行方式训练权重逐位相同；新执行方式续跑仍须保持优化器/RNG一致。
-
-`smoke`是显式工程阶段，不属于`all`训练日程，不选择方法参数。报告写入独立 `run-root/smoke/<时间>/smoke_report.json`，不产生正式模型、预测或五项指标完成状态。临时checkpoint在私有scratch中写读核对后删除。默认`preflight`行为不变。
-
-三种模式：
-
-|模式|实际执行|耗时外推边界|
-|---|---|---|
-|`constructed`|真实Exact/完整CUDA头的小构造输入；CPU时小头；合批/顺序梯度对照及checkpoint写读|检查执行链路；小NN不外推全网格，纯头测速不包含真实机械盘读取|
-|`assets`|上述头检查，加显式correspondence父资产的原100K Source、三域完整K8、固定第一张Source校准完整Q的真实检索；前三张Source训练正常RGB的原宿主前向|检索/前向按上限槽数粗估；校准图仅检索，不用于训练头；不生成合成池或两折库|
-|`prepared`|已完成本工具`prepare-training`后，实际Dataset/policy/NoRef/预取/完整头；Source两族、三域三族，共11个短作业|按6个Source预训练和27个目标模型外推训练；真实冷缓存首读、构库及全域评价仍另计|
-
-CUDA支持BF16时使用正式头训练精度；不支持时只报告FP32诊断，不冒充正式BF16已验证。合批数值核查是新执行方式的工程检查：FP32梯度相对L2≤1e-4/loss绝对差≤1e-5；BF16分别≤0.03/0.01，并记录实际差值。它不修改任何既有距离、地图或历史复核容差。报告列出均值/P50/P95、数据等待、checkpoint读写、Exact传输次数/字节、RAM/显存及已测环节小时外推。未测项留`pending`，`total_hours`保持空值，不拼造整轮实测耗时。首次计时包含库/驱动热身影响，稳定部分单列。
-
-服务器执行（同步代码后，单物理GPU1、最多8 CPU；无关机）：
+新建compact（以下为之后人工使用的命令，本轮不执行，也未推送）：
 
 ```bash
 cd /home/ubun/YYK/DINO-Reference-AD
-tag=aebad_reference_residual_smoke_$(date +%Y%m%d_%H%M%S)
-run=/home/ubun/YYK/runs/$tag
-cache=/home/ubun/YYK/storage/reference_residual_cache/$tag
-mkdir -p /home/ubun/YYK/runs
-tmux new-session -d -s "$tag" "cd /home/ubun/YYK/DINO-Reference-AD; env GPU_INDEX=1 CPU_WORKERS=8 RUN_ROOT='$run' CACHE_ROOT='$cache' RECENT_RUN=/home/ubun/YYK/runs/aebad_correspondence_20261025_201937 SMOKE_MODE=assets SMOKE_UPDATES=30 REFERENCE_CACHE_GIB=6 bash DINOv3/MADEqual/aebad_s_reference_residual_segmentation/scripts/run_workstation.sh smoke > '${run}_launcher.log' 2>&1"
-printf 'SESSION=%s\nRUN=%s\nLOG=%s_launcher.log\n' "$tag" "$run" "$run"
-tail -n 40 -f "${run}_launcher.log"
-```
-
-该命令不重建memory、不执行全域推理、不写父资产。会读取真实父Source/支持/校准特征、检查所用payload并加载骨干，前向3张正常训练图。父完整资产不可用则明确失败，不悄悄换构造输入。
-
-本工具训练缓存准备完成后，在同一正式`RUN_ROOT/CACHE_ROOT`和其原父参数下运行脚本，设置`SMOKE_MODE=prepared`即可只测速实际训练路径。`smoke`的短步数不改变正式2000/12000步配置；不要把旧代码已冻结的运行改名冒充本版，可复用兼容的原始资产，但需新建正式输出目录。
-
-## 手动命令
-
-仅在代码review并同步后使用已有yyk环境，不修改base或安装依赖。本地验证没有执行以下服务器命令。
-
-只读预检（physical GPU 1只作为后续计算选择，preflight不初始化CUDA）：
-
-```bash
-cd /home/ubun/YYK/DINO-Reference-AD
-GPU_INDEX=1 CPU_WORKERS=8 \
-RECENT_RUN=/home/ubun/YYK/runs/aebad_correspondence_20261025_201937 \
+PROFILE=compact_v1 GPU_INDEX=1 CPU_WORKERS=8 \
+RECENT_RUN=/home/ubun/YYK/runs/aebad_reference_residual_20261026_204836 \
+SECOND_RECENT_RUN=/home/ubun/YYK/runs/aebad_correspondence_20261025_201937 \
 bash DINOv3/MADEqual/aebad_s_reference_residual_segmentation/scripts/run_workstation.sh preflight
 ```
 
-完整手动tmux启动，固定RUN/CACHE以便续跑。**本次交付不执行此命令。**
+之后人工启动compact并固定run/cache以便续跑：
+
+```bash
+work=/home/ubun/YYK
+repo=$work/DINO-Reference-AD
+tag=aebad_reference_residual_compact_v1_$(date +%Y%m%d_%H%M%S)
+run=$work/runs/$tag
+cache=$work/storage/reference_residual_cache/$tag
+mkdir -p "$work/runs"
+tmux new-session -d -s "$tag" "cd '$repo' && env PROFILE=compact_v1 GPU_INDEX=1 CPU_WORKERS=8 REFERENCE_CACHE_GIB=6 QUERY_MODE=stream RUN_ROOT='$run' CACHE_ROOT='$cache' RECENT_RUN='$work/runs/aebad_reference_residual_20261026_204836' SECOND_RECENT_RUN='$work/runs/aebad_correspondence_20261025_201937' bash DINOv3/MADEqual/aebad_s_reference_residual_segmentation/scripts/run_workstation.sh all > '${run}_launcher.log' 2>&1"
+printf 'SESSION=%s\nRUN=%s\nCACHE=%s\nLOG=%s_launcher.log\n' "$tag" "$run" "$cache" "$run"
+```
+
+新建full必须显式 `PROFILE=full_v1`并使用新目录。继续现有5091600旧full时也必须显式full，保持旧run/cache和父来源，绝不以compact启动旧目录：
 
 ```bash
 cd /home/ubun/YYK/DINO-Reference-AD
-tag=aebad_reference_residual_$(date +%Y%m%d_%H%M%S)
-run=/home/ubun/YYK/runs/$tag
-cache=/home/ubun/YYK/storage/reference_residual_cache/$tag
-mkdir -p /home/ubun/YYK/runs
-tmux new-session -d -s "$tag" "cd /home/ubun/YYK/DINO-Reference-AD; env GPU_INDEX=1 CPU_WORKERS=8 RUN_ROOT='$run' CACHE_ROOT='$cache' RECENT_RUN=/home/ubun/YYK/runs/aebad_correspondence_20261025_201937 bash DINOv3/MADEqual/aebad_s_reference_residual_segmentation/scripts/run_workstation.sh all > '${run}_launcher.log' 2>&1"
-printf 'SESSION=%s\nRUN=%s\nCACHE=%s\nLOG=%s_launcher.log\n' "$tag" "$run" "$cache" "$run"
-tail -n 40 -f "${run}_launcher.log"
+PROFILE=full_v1 GPU_INDEX=1 CPU_WORKERS=8 REFERENCE_CACHE_GIB=6 \
+RUN_ROOT=/home/ubun/YYK/runs/aebad_reference_residual_20261026_204836 \
+CACHE_ROOT=/home/ubun/YYK/storage/reference_residual_cache/aebad_reference_residual_20261026_204836 \
+RECENT_RUN=/home/ubun/YYK/runs/aebad_correspondence_20261025_201937 \
+bash DINOv3/MADEqual/aebad_s_reference_residual_segmentation/scripts/run_workstation.sh all
 ```
 
-可单独执行 `prepare → synthesize` 查看`previews/`后，再执行`prepare-training → train-source → train-target → calibrate → predict → evaluate → evaluate-aupro → summarize → pack`。把同一RUN_ROOT/CACHE_ROOT和RECENT_RUN环境变量传给脚本即可。续跑执行同样参数的原阶段或`all`；已完成准备阶段优先检查小manifest，不再全量扫描RGB/完整特征，payload在真正消费时核查。中断前未提交的特征块可能重提取，已封存模型从保存update继续；更改实现/配置要新建运行目录。`evaluate/evaluate-aupro`使用冻结预测、校准和GT，不要求Source bank或骨干实体；重建地图的软件版本仍需与冻结配置一致。
+旧full无profile字段时，已封存旧CONFIG派生只读full视图，保持旧完整NN布局，不在旧目录写入新版resolved_config/job_plan。只允许已登记5091600旧实现或未变的依赖；未知旧实现、输入/配置冲突拒绝。不是任意代码版本的自动迁移。新目录都必须冻结新版配置/清单，不能切换profile续用原模型。上面旧full例子仍会执行原大预算，不用于compact验证。
 
-## 输出、校准和完成状态
+## 执行优化、smoke与资源
 
-- `inputs.json/catalog.json/prepared.json/raw_assets.json/reuse_audit.json`：输入、原图/支持顺序、原始资产来源、提取配置与代码身份。
-- `foreground_audit.csv/previews/`：全部455 Source与24 Target辅助前景；合成每原图前4槽预览，不能据真实异常指标选合成规则。
-- `synthetic_manifest.json`：所有5944槽，含无效原因；大cache保存RGB、生成区、实际变化、soft_output、固定供体/参数。
-- `training_manifest.json`：每原图/合成的完整前向来源、物理位置、tile/halo、Source/Target索引及自排除policy。残差训练时按原始行计算，不重复保存。
-- `models/`：optimizer、scheduler位置、Torch/CUDA RNG、PCG采样方案、完成update、固定最终模型与日志。
-- `calibration/`：新raw logits的patch MAD、域K8条件下66 Source图的image MAD；基线保留原Source-only距离MAD。零/近常数输出明确失败，不能用小分母救场。
-- `predictions_frozen.json`：926张×14分支全部提交后才能解码GT。未冻结完整人口不能评价。
-- `evaluation/`：两种图像评分、共享像素评价、同缓存数值复核、逐图地图/GT SHA、连通实例及固定UNION峰值口径，保留NA/小缺陷。
-- `aupro/<domain>/<branch>.json`：14×3个逻辑作业，原ADEval1.1.0/200阈值/FPR≤.3。6个基线作业可在严格相同地图证明后复用，新增模型最多36个作业；不是CH1/CURRENT两倍。
-- `metrics.csv/metric_comparisons.csv/training_repeat_summary.csv/margin_*.csv/objective_report.md/status.json`：分域和三域等权macro，单模型波动与实际集成分开。CH1/CURRENT和历史来源保留；AUPRO未齐保持pending，不填0。
-- `costs/`：阶段时间、峰值RSS/显存、新增数组字节；`storage_usage.csv`：实际存储量；`training_jobs.csv`：参数/模型大小和训练时间。
-- `_review.tar.gz`：报告/元数据/预览/日志，排除cache、scratch、`.bin/.npy/.pt`。大缓存和可恢复checkpoint应另行备份，review包本身不保证可重训。
+保留有界原始参照GPU LRU（默认4GiB，`REFERENCE_CACHE_GIB`可显式调整）、同查询层共享上传、CPU预取、同尺寸tile合批。合批不padding，不改逐图插值与损失权重；浮点归约顺序不同，不承诺旧执行方式训练权重逐位相同。新执行的checkpoint仍封存优化器、RNG、scheduler/update并支持续跑。没有自动容量准入、自动降级或第二张卡。
 
-margin在各模型独立校准尺度下仅为辅助，不能当成真实信息损失或部署漏检。raw NN距离不改变，因此不把新logit变化命名为原距离R_N/R_A/G。收益需同时看图像、定位、实例和种子波动；不能据训练loss或热图宣布有效。
+`smoke`三种模式均只测请求路径：constructed使用固定构造输入重复，隔离计算/传输，不再每步生成大随机输入；assets增加真实父完整检索及3张Source正常前向；prepared使用真实Dataset和预取。compact prepared只有Source REF与三个域REF_ST四种短作业。报告列出profile任务数/updates/计划槽位/926人口，未请求控制及无集成。临时checkpoint写读在私有scratch，smoke不提交正式训练或评价状态。本轮只测试CPU构造输入，不执行服务器smoke。
+
+耗时按构库/补特征、合成/训练缓存、头训练、校准/预测、CPU评价和AUPRO分项。训练来自实际任务清单，已经提交的工作不计待执行；有效合成/稀疏几何未测不把完整K8时间按旧5944池硬套。构造输入只报告计算/传输下界，真实输入路径吞吐另测。未知项保持null/pending，不填0，不承诺几小时必完，也不把先前full的25小时当compact估计。
+
+大缓存使用机械盘，代码/日志/模型和单层采样/精确评价scratch使用指定SSD私有路径。正常完整网格逻辑大小仍约145GiB，能链接则不新增；两折bank约3.8GiB，候选spool逐折约61GiB、SSD暂存每次一层约15GiB（13924网格估计）。compact不保存全部合成全网格，tile/RGB/标签/NN大小按实际记录；不能保证总量只需几十GB。stream不默认保存926张Q。
+
+## 输出与结论边界
+
+主要输出：resolved_config/job_plan、prepared/raw_assets、synthetic_manifest及类型/尺度/normal-only清单、training_manifest及NN位置资源、models、独立calibration、冻结predictions、metrics/metric_comparisons、training_repeat_summary、实例margin、costs、reuse审计、objective_report和status。像素分支只算一次，CH1/CURRENT引用同一结果；兼容基线指标与新增计算分别标明来源。
+
+compact只检验单种子、小预算主方法在三域完整评价上是否值得继续投入。单种子标准差为NA；不写跨种子稳定。控制未请求则不据此回答参照/Target查询的独立作用。效果差只报告当前预算，不否定充分训练的全部可能；不看测试GT延长训练、调阈值/权重或挑checkpoint。GT仍只在全部正式预测冻结后用于评价。
 
 ## 本地验证
 
-```powershell
-$env:OMP_NUM_THREADS='1'; $env:MKL_NUM_THREADS='1'; $env:OPENBLAS_NUM_THREADS='1'
-$env:MPLBACKEND='Agg'
-& 'D:/anaconda/miniconda/envs/chinamoblie/python.exe' -X utf8 -B -m unittest DINOv3.tests.test_aebad_s_reference_residual_segmentation -v
+2026-10-27收尾验证：73项CPU测试全部通过（171.423秒），23份Python文件编译通过，默认脚本`bash -n`通过。默认预检正确列出4个训练任务、13000 updates、1294计划槽位及9个定位评价任务；未导入Torch、未创建实验目录。当前本地预检仍缺DINOv3权重、官方源码及ADEval；父资产仅有本地元数据，未验证服务器实际缓存。另对登记旧版本的Poisson、texture、scratch各一例执行原生成函数比较，RGB/标签及诊断逐位一致；这只验证固定构造输入下的生成兼容性。
+
+```bash
+python -B -m unittest DINOv3.tests.test_aebad_s_reference_residual_segmentation DINOv3.tests.test_reference_residual_execution DINOv3.tests.test_reference_residual_compact -v
 ```
 
-实际结果和检查清单见`implementation_audit.md`。测试使用G盘临时目录，不安装Torch/ADEval。真实DINO、原增强100轮训练fold构建、CUDA/BF16、全量缓存I/O、正式训练与ADEval尚未验证。CPU小张量训练通过不能称为真实实验完成。
+范围和实测记录见 `implementation_audit.md`、`validation_results.json`。包含原full回归、compact三分支构造CPU接入、真实CPU Exact/梯度/续跑/只读兼容导入/稀疏位置映射；RGB宿主及训练模型来源在接入夹具中替代，评价人口缩为每域2张，不等于真实926图。AUPRO完成状态测试使用明确的报告夹具，不冒充实际后端运行。真实CUDA/BF16、稀疏GPU数值、大缓存复用及compact完整训练/评价均待review后的人工验证。本轮到此停止。

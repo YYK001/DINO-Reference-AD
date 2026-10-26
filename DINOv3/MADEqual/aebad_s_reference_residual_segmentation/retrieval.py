@@ -130,9 +130,12 @@ def build_source_folds(a):
             sampler='original_100_round_distance_based_normalize_false',budget=CONFIG['bank_rows'],augmentation='original_brightness_0.8_1.2')
         if (path/'manifest.json').exists():
             _,r=st.get(path)
-            if {k:v for k,v in r['metadata'].items() if k!='candidate_ledger'}!=expected:raise ValueError('training Source fold identity changed')
+            if any(r['metadata'].get(k)!=v for k,v in expected.items()):raise ValueError('training Source fold identity changed')
             record_size(fold,r['metadata'])
             continue
+        from . import reuse
+        if reuse.fold(a,'fold_'+fold,expected):
+            record_size(fold,st.sealed_json(path/'manifest.json')['metadata']);continue
         if model is None:model,_=host(a)
         import random
         seed=fold_seed;random.seed(seed);np.random.seed(seed)

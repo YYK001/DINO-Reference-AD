@@ -1,0 +1,29 @@
+{
+  "format": "reference_residual_known_full_v1_implementation",
+  "commit": "5091600d76064b5d5ed23a9616ac1c0c8035a3d5",
+  "code": {
+    "calibration.py": "f85c933e5942968dc36c5bf4a189ebf62d8796ef7e5b029f61f9c5fa7db6e834",
+    "evaluation.py": "333dce8151c467c6bbc21ec286571dc87087fd1c8f60fcedd31da7f5565e7fff",
+    "execution.py": "a9371c8255c35da37215493532b50d1fbbba08ba3bc9ba978e99f933048ec609",
+    "inference.py": "ae66ff27699fd65a5a64ae43446af03c91ea6cea209566959ad3404618e29605",
+    "inputs.py": "5e79d0a22cbe7a64dbe4c3fd3a0da822bce4be7670c669c1b7c04da9ae7898dd",
+    "model.py": "33466e3a6aeb31dde2c68e2f4121edc003c055f68456cc4a12b36c5a266fe3a2",
+    "prediction.py": "5bde32e4517029926213aca57d9b5b2c3d69cc07bb6e6308d6259b93e23d2bf8",
+    "protocol.py": "7ba346ba9ae5f348cc6643a5ca99f267f217103b32e06faae1c7cc7e41e7f244",
+    "reporting.py": "3521c4de1a6e8954e42952bfca195d7519f7446de5a0bc485d6a5968aa0c25f7",
+    "retrieval.py": "eb6a2564f0568344ed80e15cbead56c3bfb8071e446a579e8d2bde31fb8da1fb",
+    "runner.py": "133fa162145ab1399fa251111eea83d8d735fe2036e0985325ae710232ec9f0e",
+    "runtime.py": "4de93d3a6d3a18ed9fe16fe0f912d8ac82080c5233b7547f2150f9477d634260",
+    "smoke.py": "b2c6f3d2d29672685c32166f292a1c2c6fc3d4b5faea13eb4001591be6559f6a",
+    "storage.py": "ea3318c6998080e5ef8acb103cf5c440f030d05e533d30d231afcfb26c90e3e8",
+    "synthesis.py": "e452f2179f21d6d45d4538ebc4f79e2fb1c253126cc27fef61c97d58cd0e6585",
+    "tiles.py": "85ac490fbd1691336dd6afa47d9ff4379089c4debbf8b27e10dbe3cb6df5cfc2",
+    "training.py": "44e17e0ed15437d6eaa99ef6afa8570717f233b41c81bd8e2a4bcf673322bc89",
+    "training_data.py": "84a0ef27a2702eb36a57700af5d736ad8957782b06fadd5cdf5edfc948168641",
+    "__init__.py": "09702f8d3254ea976f22d4337f0b5391485d28205723f28b0626b84cd5c9b113"
+  },
+  "shared_RNG": {
+    "DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/storage.py": "ca6cfb1a83c08fb5cf6df2a940e483af13d200277027caa4cf16ff639b770c55",
+    "DINOv3/MADEqual/aebad_s_support_witness_segment_p0/storage.py": "2ebf6ae8d098e260513c46dc7a1b49abb7d70bcb8546ae7b109978e7e5b421b6"
+  }
+}

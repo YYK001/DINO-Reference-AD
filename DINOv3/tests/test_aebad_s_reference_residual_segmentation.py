@@ -33,7 +33,7 @@ class Temporary(unittest.TestCase):
     def args(self,name='run'):
         return runner.normalize(runner.parser().parse_args(['--run-root',str(self.root/name),'--cache-root',str(self.root/(name+'_cache')),
             '--evaluation-scratch',str(self.root/(name+'_scratch')),'--data',str(self.root/'input.zip'),'--checkpoint',str(self.root/'weights.pth'),
-            '--official-root',str(self.root/'host'),'--dinov3-root',str(self.root/'dino'),'--device','cpu']))
+            '--official-root',str(self.root/'host'),'--dinov3-root',str(self.root/'dino'),'--device','cpu','--profile','full_v1']))
 
 
 class Origins(unittest.TestCase):
@@ -80,7 +80,7 @@ class Origins(unittest.TestCase):
     def test_fixed_pool_and_donors(self):
         # Small population exercises the production manifest without 5944 RGBs.
         self.c['source']=self.c['source'][:17]
-        first=synthesis.manifest(self.c);second=synthesis.manifest(self.c)
+        first=synthesis.manifest(self.c,p.resolve('full_v1'));second=synthesis.manifest(self.c,p.resolve('full_v1'))
         self.assertEqual(first,second);self.assertEqual(len(first),14*8+24*96)
         valid={r['relative_path'] for r in ip.train_source(self.c)}
         lookup={r['relative_path']:d for d in p.DOMAINS for r in self.c['supports'][d]}
@@ -424,11 +424,16 @@ class CPU(Temporary):
         for k in controls[0]:t.testing.assert_close(controls[0][k],controls[1][k],atol=0,rtol=0)
         self.assertEqual(before,st.sha(training.path(bb,'source','REF_ST',42)/'latest.json'))
     def test_actual_new_calibration_prediction_and_CPU_metrics_on_constructed_features(self):
+        self.integration('full_v1')
+    def test_compact_actual_calibration_prediction_and_CPU_metrics(self):
+        self.integration('compact_v1')
+    def integration(self,profile):
         """Real 1280D Exact, four-layer heads/maps/metrics. Fake RGB host and heads' training only."""
         from DINOv3.MADEqual.aebad_s_reference_residual_segmentation import prediction,evaluation,training,runtime
         from DINOv3.MADEqual.aebad_s_reference_residual_segmentation.model import Head
         from DINOv3.MADEqual.aebad_s_support_witness_segment_p0 import fresh_inputs
-        a=self.args();a.cpu_workers=1;c=catalog();samples=[];rng=np.random.default_rng(18)
+        a=self.args();a.profile=profile;a.cpu_workers=1;c=catalog();samples=[];rng=np.random.default_rng(18)
+        requested=ip.plan(a);model_calls=[]
         for d in p.DOMAINS:
             for i in range(2):samples.append(dict(domain=d,sample_id=f'test_{i}',relative_path=f'test/{d}/{i}.png',
                 image_height=64,image_width=64,image_sha256=d+str(i),label=i))
@@ -445,6 +450,7 @@ class CPU(Temporary):
             q,g=features(row);st.put(ip.normal_path(a,row),{**{f'q{l}':q[l] for l in p.LAYERS},'positions':g['positions']},
                 dict(grid=g['grid'],output_shape=[16,16],image=row))
         def trained(args,domain,family,seed):
+            self.assertIn(p.member(family,seed),requested['members']);model_calls.append((domain,family,seed))
             self.torch.manual_seed(st.seed('CPU-head-fixture',domain,family,seed)%2**31)
             return Head(1280,8).eval(),dict(checkpoint_sha256=f'{domain}_{family}_{seed}_fixture')
         calls={'GT':0,'forward':0}
@@ -467,12 +473,13 @@ class CPU(Temporary):
             seals=[st.sealed_json(prediction.prediction_path(a,s)/'manifest.json')['seal'] for s in samples]
             result=prediction.predict(a);self.assertEqual(result['query_forward_calls'],0);self.assertEqual(calls['forward'],6)
             evaluation.evaluate(a);before=calls['GT'];evaluation.evaluate(a);self.assertEqual(calls['GT'],before)
-            status=reporting.summarize(a);self.assertEqual(status['status'],'pending');self.assertEqual(status['metric_rows'],120)
+            status=reporting.summarize(a);self.assertEqual(status['status'],'pending');self.assertEqual(status['metric_rows'],requested['expected_metric_rows'])
             rows=evaluation.read_csv(a.run_root/'metrics.csv');self.assertTrue(all(r['AUPRO']=='' for r in rows))
-            self.assertEqual(len(rows),120);self.assertEqual(set(r['scoring'] for r in rows),{'CH1','CURRENT'})
+            self.assertEqual(len(rows),requested['expected_metric_rows']);self.assertEqual(set(r['scoring'] for r in rows),{'CH1','CURRENT'})
+            self.assertEqual(len(model_calls),len(p.DOMAINS)*len(requested['members'])*2)
             for d in p.DOMAINS:
                 local=evaluation.read_csv(a.run_root/'evaluation'/d/'metrics.csv')
-                for b in p.BRANCHES:
+                for b in requested['branches']:
                     pair=[r for r in local if r['branch']==b]
                     self.assertEqual(pair[0]['pixel_AP'],pair[1]['pixel_AP'])
             self.assertEqual(seals,[st.sealed_json(prediction.prediction_path(a,s)/'manifest.json')['seal'] for s in samples])
@@ -493,8 +500,9 @@ class Interface(Temporary):
         from importlib.metadata import version
         a=self.args();c=catalog();a.stage='evaluate'
         st.sealed_json(a.run_root/'catalog.json',dict(catalog=c))
+        known=st.read_json(Path(p.__file__).with_name('legacy_full_v1_compatibility.json'))['code']
         st.sealed_json(a.run_root/'inputs.json',dict(config=p.CONFIG,cache=str(a.cache_root),query_mode=a.query_mode,
-            catalog=st.digest(c),code={},extraction=dict(software={n:version(n) for n in ('numpy','scipy','Pillow')})))
+            catalog=st.digest(c),code={'DINOv3/MADEqual/aebad_s_reference_residual_segmentation/'+k:v for k,v in known.items()},extraction=dict(software={n:version(n) for n in ('numpy','scipy','Pillow')})))
         runner.validate_runtime_inputs(a)
         self.assertFalse((a.cache_root/'source_original').exists());self.assertFalse(a.dinov3_root.exists())
     def test_preflight_no_torch_no_output(self):

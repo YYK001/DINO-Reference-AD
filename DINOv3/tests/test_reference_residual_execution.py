@@ -85,16 +85,18 @@ class Execution(unittest.TestCase):
             for phase in ('source','background','illumination','view'):
                 actual,_=st.get(ip.item_path(a,item)/'target_nn'/phase);origins=record['contexts'][phase]['policy']['target_origins']
                 bank,_,offsets=refs.target(origins,7);d,i,_=retrieval.target_nearest(q[7],bank,offsets,'cpu')
-                np.testing.assert_array_equal(actual['d7'],d);np.testing.assert_array_equal(actual['i7'],i)
+                from DINOv3.MADEqual.aebad_s_reference_residual_segmentation.tiles import rows_for
+                take=rows_for(position,actual['positions'],[2,2])
+                np.testing.assert_allclose(actual['d7'],d[take],atol=1e-7,rtol=1e-6);np.testing.assert_array_equal(actual['i7'],i[take])
                 del actual,bank
             self.assertEqual(refs.search.stats['query_uploads'],8)  # four layers per query, not per support/context
             del refs
     def test_smoke_projection_is_explicitly_partial(self):
         from DINOv3.MADEqual.aebad_s_reference_residual_segmentation.smoke import estimate
         report=estimate(dict(train_seconds_per_update=.1),{})
-        self.assertAlmostEqual(report['components_hours']['head_training'],336000*.1/3600)
+        self.assertAlmostEqual(report['components_hours']['head_compute_transfer_lower_bound'],13000*.1/3600)
         self.assertIsNone(report['total_hours']);self.assertTrue(report['pending'])
-        report=estimate(dict(prepared_jobs=[dict(seconds_per_update=.1,phase='source',formal_BF16_verified=False)]),{})
+        report=estimate(dict(prepared_jobs=[dict(seconds_per_update=.1,phase='source',family='REF_ST',formal_BF16_verified=False)]),{})
         self.assertNotIn('head_training',report['components_hours'])
     def test_constructed_CPU_smoke_is_isolated_and_never_completes_formal_run(self):
         from DINOv3.MADEqual.aebad_s_reference_residual_segmentation import runner

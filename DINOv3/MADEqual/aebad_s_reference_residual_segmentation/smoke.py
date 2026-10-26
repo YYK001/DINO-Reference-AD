@@ -8,7 +8,7 @@ import threading
 import time
 import numpy as np
 from . import inputs as ip,storage as st
-from .protocol import CONFIG,DOMAINS,LAYERS,FAMILIES
+from .protocol import CONFIG,DOMAINS,LAYERS
 
 
 def sync(device):
@@ -22,43 +22,58 @@ def timed(device,fn):
     return result,time.perf_counter()-start
 
 
-def estimate(head,assets):
-    """Only extrapolate measured components; never invent sampling/evaluation costs."""
-    components={};pending=['two-fold original augmentation/sampling and scratch I/O','full CPU/ADEval evaluation',
-        'synthesis validity and foreground preparation','training-cache write/read cost and real tile distribution']
-    if 'train_seconds_per_update' in head:
-        components['head_training']=336000*head['train_seconds_per_update']/3600
-    else:pending.append('formal BF16 head throughput')
-    if assets.get('backbone_seconds_per_image') is not None:
-        # Upper declared slot count, not test-selected effective pool size.
-        components['RGB_forward_upper_slot_count']=(455+5944+926)*assets['backbone_seconds_per_image']/3600
-    else:pending.append('actual frozen backbone extraction')
+def estimate(head,assets,config=None,plan=None,inventory=None):
+    """Requested remaining work only. Unknown stages stay unknown, never zero."""
+    from .protocol import resolve,job_plan
+    config=resolve() if config is None else config;plan=job_plan(config) if plan is None else plan
+    inventory={} if inventory is None else inventory
+    components={};unknown=[]
+    if head.get('prepared_jobs'):
+        indexed={(r['phase'],r['family']):r for r in head['prepared_jobs']}
+        todo=[j for j in plan['training_jobs'] if (j['phase'],j['family'],j['seed']) not in inventory.get('completed_training_jobs',[])]
+        if all((j['phase'],j['family']) in indexed and indexed[j['phase'],j['family']]['formal_BF16_verified'] for j in todo):
+            components['head_training']=sum(j['updates']*indexed[j['phase'],j['family']]['seconds_per_update'] for j in todo)/3600
+        else:unknown.append('requested real Dataset/BF16 job throughput')
+    elif 'train_seconds_per_update' in head:
+        updates=sum(j['updates'] for j in plan['training_jobs'] if (j['phase'],j['family'],j['seed']) not in inventory.get('completed_training_jobs',[]))
+        components['head_compute_transfer_lower_bound']=updates*head['train_seconds_per_update']/3600
+        unknown.append('real Dataset reading/reference assembly and checkpoint costs')
+    else:unknown.append('formal BF16 head throughput')
+    raw=inventory.get('normal_feature_forwards_remaining')
+    if raw==0:components['original_normal_feature_forwards']=0.
+    elif raw is not None and assets.get('backbone_seconds_per_image') is not None:
+        components['original_normal_feature_forwards']=raw*assets['backbone_seconds_per_image']/3600
+    else:unknown.append('missing original normal feature inventory/throughput')
+    synth=inventory.get('synthetic_forwards_remaining')
+    if synth==0:components['synthetic_RGB_forwards']=0.
+    else:unknown.append('effective selected synthetic pool/forward throughput and sparse NN geometry')
     if assets.get('domains'):
         rows=list(assets['domains'].values());source=float(np.mean([r['warm_Source_seconds']+r['warm_query_upload_seconds'] for r in rows]))
-        targets=[r['warm_Target8_seconds'] for r in rows];target=float(np.mean(targets))
-        components['training_NN_rough']=((455+3640)*(source+sum(targets)+target)+(24+2304)*(source+target*7/8))/3600
-        components['calibration_and_test_NN_rough']=(198+926)*(source+target)/3600
-    else:pending.append('full-size original Source/Target NN throughput')
-    if head.get('prepared_jobs'):
-        if all(r['formal_BF16_verified'] for r in head['prepared_jobs']):
-            components['head_training']=sum(r['seconds_per_update']*(2000 if r['phase']=='source' else 12000)*3
-                for r in head['prepared_jobs'])/3600
-            pending.remove('training-cache write/read cost and real tile distribution')
-            pending.append('full-cache first-use hashes and checkpoint writes outside measured warm steps')
-    return dict(components_hours=components,measured_component_subtotal_hours=sum(components.values()),total_hours=None,pending=pending,
-        interpretation='component extrapolation, not measured end-to-end runtime; no total while unmeasured stages remain',
-        NN_assumptions='full-grid calibration query and K8 timings approximate synthetic/source-simulated/K7 searches; hardware/cache/morphology may differ',
-        head_assumptions='constructed mode excludes real disk loading; prepared mode includes production prefetch and actual Dataset; shape mix and cold I/O may differ')
+        target=float(np.mean([r['warm_Target8_seconds'] for r in rows]))
+        remaining=inventory.get('full_grid_calibration_prediction_NN_remaining')
+        if remaining is not None:components['full_grid_calibration_prediction_NN']=remaining*(source+target)/3600
+    stages={name:None for name in ('build_and_original_features','synthesis_and_training_cache','head_training','calibration_and_prediction','CPU_evaluation','AUPRO')}
+    if 'head_training' in components:stages['head_training']=components['head_training']
+    unknown += ['two-fold original sampler and candidate scratch I/O','synthesis generation/validity and cache writes',
+        'CPU evaluation and original ADEval AUPRO','logit calibration/prediction heads and scoring']
+    return dict(profile=config['profile'],job_plan=plan,inventory=inventory,components_hours=components,stage_hours=stages,
+        measured_component_subtotal_hours=sum(components.values()),total_hours=None,pending=unknown,
+        interpretation='component extrapolation only; unknown stages not zero; no unrequested controls or repeated computations',
+        head_assumptions='constructed fixed inputs measure compute/transfer lower bound; prepared uses actual Dataset/prefetch; cold reads and checkpoint costs separately pending')
 
 
 def head_benchmark(a,*,dataset=None,phase='source',family='REF_ST'):
     import torch
     from .model import Head
     from .training import prepare_batch,backward_batch,rate
+    cfg=ip.config(a)
     cuda=str(a.device).startswith('cuda');dimension,channels=(1280,128) if cuda or dataset is not None else (16,8)
     bf16=cuda and torch.cuda.is_bf16_supported();torch.backends.cudnn.allow_tf32=False
     torch.manual_seed(42);net=Head(dimension,channels).to(a.device);optimizer=torch.optim.AdamW(net.parameters(),lr=3e-4,weight_decay=1e-4)
+    fixed=None
     def batch(number):
+        nonlocal fixed
+        if dataset is None and fixed is not None:return fixed
         if dataset is not None:
             choices=dataset.select(42,number,source_queries_only=family=='REF_SOURCE_QUERY');samples=[dataset.load(c) for c in choices]
         else:
@@ -68,7 +83,9 @@ def head_benchmark(a,*,dataset=None,phase='source',family='REF_ST'):
                 if i%2:soft[h:2*h,w:2*w]=.5
                 samples.append(dict(values=[torch.randn(1,3*dimension+3,h,w,generator=gen) for _ in LAYERS],
                     soft=soft,origin=[0,0],grid=[h,w],shape=list(soft.shape),center=[4,4,h-4,w-4] if h>8 else [0,0,h,w]))
-        return samples,prepare_batch(samples,pin=cuda)
+        value=(samples,prepare_batch(samples,pin=cuda))
+        if dataset is None:fixed=value
+        return value
     # Compare the actual production loss/backward against the previous sequential form.
     samples,packed=batch(0);old=copy.deepcopy(net);old.zero_grad();net.zero_grad()
     old_loss=backward_batch(old,prepare_batch(samples,pin=cuda,grouped=False),a.device,bf16=bf16)
@@ -90,7 +107,7 @@ def head_benchmark(a,*,dataset=None,phase='source',family='REF_ST'):
             loss=backward_batch(net,groups,a.device,bf16=bf16)
             gradient=torch.nn.utils.clip_grad_norm_(net.parameters(),CONFIG['gradient_clip'])
             if not torch.isfinite(torch.stack([loss,gradient])).all():raise FloatingPointError('nonfinite smoke loss/gradient')
-            for group in optimizer.param_groups:group['lr']=rate(update,12000)
+            for group in optimizer.param_groups:group['lr']=rate(update,cfg['source_updates' if phase=='source' else 'target_updates'])
             optimizer.step();sync(a.device);seconds=time.perf_counter()-start_step
             if update>=warmup:rows.append(dict(seconds=seconds+wait,data_wait_seconds=wait,compute_transfer_seconds=seconds))
             if update%10==0:print(f'[residual smoke head] {phase}/{family} {update}/{a.smoke_updates+warmup}',flush=True)
@@ -138,16 +155,19 @@ def assets_benchmark(a):
     from DINOv3.MADEqual.aebad_s_support_witness_segment_p0.fresh_inputs import Data
     if not a.recent_run:raise ValueError('assets smoke requires --recent-run correspondence parent')
     parent=ip.recent(a.recent_run[0])
-    if parent['kind']!='correspondence':raise ValueError('assets smoke requires original correspondence schema')
+    if parent['kind'] not in ('correspondence','reference_residual'):raise ValueError('assets smoke requires original raw asset schema')
     print('[residual smoke assets] validating parent/extraction identity; checkpoint and used payloads read once',flush=True)
     c=parent['catalog'];compatible(a,parent,c,extraction_record(a));prepared=st.sealed_json(parent['run']/'prepared.json')
     store=st.Store(100);bank,br=store.load(parent['cache']/'source_original')
     if prepared['source_seal']!=br['seal']:raise ValueError('parent original bank not frozen by prepared')
     def full(row):
-        p=parent['cache']/'features'/ip.key(row);keys=tuple([f'full_L{l}' for l in LAYERS]+['full_positions'])
+        own=parent['kind']=='reference_residual'
+        p=parent['cache']/('normal_features' if own else 'features')/ip.key(row)
+        keys=tuple([f'q{l}' if own else f'full_L{l}' for l in LAYERS]+['positions' if own else 'full_positions'])
         x,r=store.load(p,keys)
-        if prepared['features'][row['relative_path']]!=r['seal'] or r['metadata']['image']!=row:raise ValueError('parent full feature identity differs')
-        q={l:x[f'full_L{l}'] for l in LAYERS};g=dict(r['metadata']);g['positions']=x['full_positions']
+        seal=prepared['normal_features'][row['relative_path']]['seal'] if own else prepared['features'][row['relative_path']]
+        if seal!=r['seal'] or r['metadata']['image']!=row:raise ValueError('parent full feature identity differs')
+        q={l:x[f'q{l}' if own else f'full_L{l}'] for l in LAYERS};g=dict(r['metadata']);g['positions']=x['positions' if own else 'full_positions']
         raw_layers({**{f'q{l}':q[l] for l in LAYERS},'positions':g['positions']},g)
         return q,g,r['seal']
     query,g,qseal=full(next(r for r in c['source'] if r['calibration']));search=resident(a);domains={}
@@ -208,21 +228,22 @@ def smoke(a):
         while not done.wait(30):print(f'[heartbeat] stage=smoke mode={a.smoke_mode} seconds={time.perf_counter()-start:.0f}',flush=True)
     thread=threading.Thread(target=heartbeat,daemon=True);thread.start()
     try:
+        cfg=ip.config(a);plan=ip.plan(a);inventory=ip.work_inventory(a)
+        result.update(resolved_config=cfg,job_plan=plan)
         result['small_exact']=small_exact(a);assets={};head={}
         if a.smoke_mode=='prepared':
             from .runner import validate_runtime_inputs
             from .training_data import Dataset
             validate_runtime_inputs(a);jobs=[];shared=st.Store()
-            for phase in ('source',*DOMAINS):
-                for family in (('REF_ST','NOREF_ST') if phase=='source' else FAMILIES):
-                    dataset=Dataset(a,phase,family!='NOREF_ST',store=shared)
-                    jobs.append(head_benchmark(a,dataset=dataset,phase=phase,family=family));del dataset
+            for phase,family in dict.fromkeys((j['phase'],j['family']) for j in plan['training_jobs']):
+                dataset=Dataset(a,phase,family!='NOREF_ST',store=shared)
+                jobs.append(head_benchmark(a,dataset=dataset,phase=phase,family=family));del dataset
             head['prepared_jobs']=jobs
         else:
             job=head_benchmark(a);head['constructed_job']=job
             if job['formal_BF16_verified']:head['train_seconds_per_update']=job['seconds_per_update']
         if a.smoke_mode=='assets':assets=assets_benchmark(a)
-        result.update(status='smoke_complete',head=head,assets=assets,time_estimate=estimate(head,assets),
+        result.update(status='smoke_complete',head=head,assets=assets,time_estimate=estimate(head,assets,cfg,plan,inventory),
             pending=['real training-cache throughput: run prepared smoke after prepare-training'] if a.smoke_mode!='prepared' else [])
         return dict(status='engineering_smoke_complete_not_formal',report=str(dest/'smoke_report.json'),time_estimate=result['time_estimate'])
     except BaseException as error:

@@ -1,0 +1,302 @@
+{
+  "scope": "static_delivery_plan_not_executed",
+  "resolved_config": {
+    "version": "reference_residual_segmentation_v1",
+    "layers": [
+      7,
+      15,
+      23,
+      31
+    ],
+    "dimension": 1280,
+    "support_seed": 42,
+    "training_seeds": [
+      42
+    ],
+    "families": [
+      "REF_ST"
+    ],
+    "Source_images": 521,
+    "Source_training": 455,
+    "Source_calibration": 66,
+    "populations": {
+      "background": [
+        297,
+        85,
+        212
+      ],
+      "illumination": [
+        265,
+        67,
+        198
+      ],
+      "view": [
+        364,
+        84,
+        280
+      ]
+    },
+    "bank_rows": 100000,
+    "sampler_rounds": 100,
+    "source_bank_augmentation": "original_brightness_0.8_1.2",
+    "fold": "ordered_455_alternating_A_B",
+    "sim_supports": "opposite_fold_fixed_7_or_8_by_origin",
+    "synthesis_seed": 20261026,
+    "source_versions": 2,
+    "target_versions": 16,
+    "synthesis_cycle": [
+      "poisson",
+      "poisson",
+      "texture",
+      "scratch"
+    ],
+    "retry_limit": 4,
+    "scales": {
+      "small": [
+        0.01,
+        0.025
+      ],
+      "medium": [
+        0.04,
+        0.1
+      ],
+      "large": [
+        0.12,
+        0.25
+      ]
+    },
+    "scratch_width_pixels": [
+      1,
+      3
+    ],
+    "poisson_mode": "NORMAL_CLONE",
+    "texture_alpha": [
+      0.55,
+      0.95
+    ],
+    "change_minimum": 0.00784313725490196,
+    "soft_change_scale": 0.1,
+    "minimum_changed_pixels": 1,
+    "foreground": {
+      "method": "Source_PC1_center_sign_Otsu_largest_component",
+      "iterations": 12,
+      "bank_stride": 8,
+      "minimum_area": 0.05,
+      "maximum_area": 0.85,
+      "minimum_mask_overlap": 0.8
+    },
+    "vector_normalization": "original_Source_channel_mean_and_scalar_RMS",
+    "distance_divisor": 1280,
+    "channels": 128,
+    "dilations": [
+      1,
+      2
+    ],
+    "halo": 4,
+    "tile_center": 16,
+    "tile_normal_probability": 0.5,
+    "source_updates": 1000,
+    "target_updates": 4000,
+    "effective_batch_images": 4,
+    "query_balance": "normal_synthetic_1_1; target_stage_REF_ST_NOREF_ST_Source_Target_1_1",
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "warmup_fraction": 0.05,
+    "minimum_lr": 1e-06,
+    "gradient_clip": 1.0,
+    "log_every": 100,
+    "checkpoint_every": 200,
+    "loss": "mean_layer_balanced_BCE+balanced_BCE_mean_logit+0.5_soft_Dice_mean_logit",
+    "precision": "raw_and_NN_and_residual_FP32; head_training_BF16_CUDA; loss_FP32; no_TF32",
+    "logit_minimum_scale": 1e-06,
+    "logit_minimum_relative_scale": 1e-05,
+    "nstrips": 200,
+    "FPR_max": 0.3,
+    "output_downscale": 4,
+    "profile": "compact_v1",
+    "run_config_version": "reference_residual_profiles_v1",
+    "synthesis_algorithm_version": "reference_residual_segmentation_v1",
+    "active_families": [
+      "REF_ST"
+    ],
+    "enable_ensemble": false,
+    "primary": "REF_ST_SEED42",
+    "training_nn_layout": "physical_tile_union_v1"
+  },
+  "job_plan": {
+    "profile": "compact_v1",
+    "training_jobs": [
+      {
+        "phase": "source",
+        "family": "REF_ST",
+        "seed": 42,
+        "updates": 1000
+      },
+      {
+        "phase": "background",
+        "family": "REF_ST",
+        "seed": 42,
+        "updates": 4000
+      },
+      {
+        "phase": "illumination",
+        "family": "REF_ST",
+        "seed": 42,
+        "updates": 4000
+      },
+      {
+        "phase": "view",
+        "family": "REF_ST",
+        "seed": 42,
+        "updates": 4000
+      }
+    ],
+    "source_jobs": 1,
+    "target_jobs": 3,
+    "planned_updates": 13000,
+    "training_seeds": [
+      42
+    ],
+    "active_families": [
+      "REF_ST"
+    ],
+    "members": [
+      "REF_ST_SEED42"
+    ],
+    "ensembles": [],
+    "branches": [
+      "UNION_K8",
+      "SEGMENT_K8",
+      "REF_ST_SEED42"
+    ],
+    "primary": "REF_ST_SEED42",
+    "planned_synthetic_slots": 1294,
+    "domains": [
+      "background",
+      "illumination",
+      "view"
+    ],
+    "evaluation_images": 926,
+    "localization_jobs": [
+      {
+        "domain": "background",
+        "branch": "UNION_K8"
+      },
+      {
+        "domain": "background",
+        "branch": "SEGMENT_K8"
+      },
+      {
+        "domain": "background",
+        "branch": "REF_ST_SEED42"
+      },
+      {
+        "domain": "illumination",
+        "branch": "UNION_K8"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SEGMENT_K8"
+      },
+      {
+        "domain": "illumination",
+        "branch": "REF_ST_SEED42"
+      },
+      {
+        "domain": "view",
+        "branch": "UNION_K8"
+      },
+      {
+        "domain": "view",
+        "branch": "SEGMENT_K8"
+      },
+      {
+        "domain": "view",
+        "branch": "REF_ST_SEED42"
+      }
+    ],
+    "expected_metric_rows": 32,
+    "combined": "SEGMENT_SCORE_UNION_MAP",
+    "not_requested": [
+      {
+        "branch": "REF_ST_SEED43",
+        "status": "not_requested"
+      },
+      {
+        "branch": "REF_ST_SEED44",
+        "status": "not_requested"
+      },
+      {
+        "branch": "NOREF_ST_SEED42",
+        "status": "not_requested"
+      },
+      {
+        "branch": "NOREF_ST_SEED43",
+        "status": "not_requested"
+      },
+      {
+        "branch": "NOREF_ST_SEED44",
+        "status": "not_requested"
+      },
+      {
+        "branch": "REF_SOURCE_QUERY_SEED42",
+        "status": "not_requested"
+      },
+      {
+        "branch": "REF_SOURCE_QUERY_SEED43",
+        "status": "not_requested"
+      },
+      {
+        "branch": "REF_SOURCE_QUERY_SEED44",
+        "status": "not_requested"
+      },
+      {
+        "branch": "REF_ST_ENSEMBLE",
+        "status": "not_requested"
+      },
+      {
+        "branch": "NOREF_ST_ENSEMBLE",
+        "status": "not_requested"
+      },
+      {
+        "branch": "REF_SOURCE_QUERY_ENSEMBLE",
+        "status": "not_requested"
+      }
+    ]
+  },
+  "planned_synthesis": {
+    "Source": 910,
+    "Target": 384,
+    "total": 1294,
+    "effective": null,
+    "Source_types": {
+      "poisson": 455,
+      "texture": 228,
+      "scratch": 227
+    },
+    "Target_types": {
+      "poisson": 192,
+      "texture": 96,
+      "scratch": 96
+    }
+  },
+  "cost": {
+    "stage_hours": {
+      "build_and_original_features": null,
+      "synthesis_and_training_cache": null,
+      "head_training": null,
+      "calibration_and_prediction": null,
+      "CPU_evaluation": null,
+      "AUPRO": null
+    },
+    "formal_Source_rows_per_layer": 100000,
+    "opposite_fold_banks": 2,
+    "normal_training_images": 479,
+    "calibration_images": 66,
+    "normal_complete_grids": 545,
+    "formal_evaluation_images": 926,
+    "training_NN": "actual unique tile+halo physical rows; full when covered",
+    "reused_work": "not counted as new once verified/imported; candidate paths alone unconfirmed",
+    "GPU_verified": false
+  }
+}

@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import numpy as np
 from . import inputs as ip,storage as st
-from .protocol import CONFIG,DOMAINS,SEEDS,FAMILIES
+from .protocol import CONFIG,DOMAINS
 from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation.training import checkpoint,load_checkpoint
 
 
@@ -63,7 +63,9 @@ def job(a,phase,family,seed,*,dataset=None,head=None,total=None,stop_after=None)
     from .training_data import Dataset
     from .runtime import reliable_precision
     reliable_precision(a.device);torch.backends.cudnn.allow_tf32=False;pretrain=phase=='source'
-    total=total or CONFIG['source_updates' if pretrain else 'target_updates']
+    cfg=ip.config(a);requested=ip.plan(a)['training_jobs']
+    if not any((j['phase'],j['family'],j['seed'])==(phase,family,seed) for j in requested):raise ValueError('training job not requested by frozen plan')
+    total=total or cfg['source_updates' if pretrain else 'target_updates']
     dataset=dataset or Dataset(a,phase,use_reference=family!='NOREF_ST')
     if dataset.use_reference!=(family!='NOREF_ST'):raise ValueError('NoRef data access contract differs')
     parent=None
@@ -82,7 +84,7 @@ def job(a,phase,family,seed,*,dataset=None,head=None,total=None,stop_after=None)
         with torch.cuda.device(a.device):torch.cuda.manual_seed(init)
     net=(head or Head()).to(a.device);net.train()
     if parent:
-        if parent['updates']!=CONFIG['source_updates']:raise ValueError('unfinished Source pretraining')
+        if parent['updates']!=cfg['source_updates']:raise ValueError('unfinished Source pretraining')
         old=load_checkpoint(path(a,'source',source_family(family),seed),parent['inputs'],a.device);net.load_state_dict(old['network'])
     optimizer=torch.optim.AdamW(net.parameters(),lr=CONFIG['learning_rate'],weight_decay=CONFIG['weight_decay'])
     update=0;history=[];elapsed=0.
@@ -136,15 +138,19 @@ def train(a,source=False):
     from .training_data import Dataset
     shared=st.Store()
     for phase in (('source',) if source else DOMAINS):
-        data={True:Dataset(a,phase,True,store=shared),False:Dataset(a,phase,False,store=shared)}
-        for family in (('REF_ST','NOREF_ST') if source else FAMILIES):
-            for seed in SEEDS:records.append(job(a,phase,family,seed,dataset=data[family!='NOREF_ST']))
+        jobs=[j for j in ip.plan(a)['training_jobs'] if j['phase']==phase];data={}
+        for item in jobs:
+            use=item['family']!='NOREF_ST'
+            if use not in data:data[use]=Dataset(a,phase,use,store=shared)
+            records.append(job(a,phase,item['family'],item['seed'],dataset=data[use]))
     return dict(status='requested_heads_trained',jobs=records)
 
 
 def trained(a,domain,family,seed):
     from .model import Head
     p=path(a,domain,family,seed);done=st.sealed_json(p/'complete.json');latest=st.sealed_json(p/'latest.json')
-    if done['inputs']['identity']!=ip.identity(a) or done['updates']!=CONFIG['target_updates'] or latest['sha256']!=done['checkpoint_sha256']:
+    cfg=ip.config(a)
+    if not any((j['phase'],j['family'],j['seed'])==(domain,family,seed) for j in ip.plan(a)['training_jobs']):raise ValueError('model not requested')
+    if done['inputs']['identity']!=ip.identity(a) or done['updates']!=cfg['target_updates'] or latest['sha256']!=done['checkpoint_sha256']:
         raise ValueError('incomplete/modified final head')
     x=load_checkpoint(p,done['inputs'],a.device);net=Head().to(a.device);net.load_state_dict(x['network']);net.eval();return net,done

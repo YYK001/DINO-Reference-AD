@@ -23,6 +23,23 @@ def plan(mask,grid,item_id):
     return [dict(tile=i,center=c,bounds=bounds(c,grid),positive=p) for i,(c,p) in enumerate(chosen)]
 
 
+def physical_union(plans,grid):
+    return np.unique(np.concatenate([(np.arange(t['bounds'][0],t['bounds'][2])[:,None]*grid[1]+
+        np.arange(t['bounds'][1],t['bounds'][3])).ravel() for t in plans])).astype(np.int64)
+
+
+def rows_for(available,requested,grid):
+    """Physical IDs -> actual NN rows; sparse vectors are never full-grid indexed."""
+    available=np.asarray(available);requested=np.asarray(requested);n=int(np.prod(grid))
+    if not np.issubdtype(available.dtype,np.integer) or not np.issubdtype(requested.dtype,np.integer):raise ValueError('NN physical positions must be integer IDs')
+    available=available.astype(np.int64,copy=False);requested=requested.astype(np.int64,copy=False)
+    if (available.ndim!=1 or len(np.unique(available))!=len(available) or (available<0).any() or (available>=n).any()
+            or (requested<0).any() or (requested>=n).any()):raise ValueError('invalid NN physical position mapping')
+    inverse=np.full(n,-1,np.int64);inverse[available]=np.arange(len(available));rows=inverse[requested]
+    if (rows<0).any():raise ValueError('training tile requests NN position absent from sparse cache')
+    return rows
+
+
 def output_window(center,grid,shape):
     intervals=[]
     for (lo,hi),n,m in zip(((center[0],center[2]),(center[1],center[3])),grid,shape):

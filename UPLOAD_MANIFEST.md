@@ -709,3 +709,35 @@ DINOv3/MADEqual/aebad_s_reference_residual_segmentation/validation_results.json
 DINOv3/tests/test_aebad_s_reference_residual_segmentation.py
 DINOv3/tests/test_reference_residual_execution.py
 ```
+
+
+## 2026-10-27：参照残差 compact_v1 默认配置
+
+默认4个训练任务、13000 updates、1294计划合成槽位，完整926张评价；显式full_v1保留。追加按实际依赖复用、旧full只读兼容及训练tile/halo稀疏NN，统一配置/任务驱动校准、预测、评价和成本。73项CPU测试通过；真实CUDA、训练与ADEval未在本轮执行。不上传数据、权重、缓存或正式实验结果。
+
+```text
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/calibration.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/compact_v1_plan.json
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/evaluation.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/implementation_audit.md
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/inputs.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/legacy_full_v1_compatibility.json
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/prediction.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/protocol.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/README.md
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/reporting.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/retrieval.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/reuse.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/runner.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/runtime.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/scripts/run_workstation.sh
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/smoke.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/synthesis.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/tiles.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/training.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/training_data.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/validation_results.json
+DINOv3/tests/test_aebad_s_reference_residual_segmentation.py
+DINOv3/tests/test_reference_residual_execution.py
+DINOv3/tests/test_reference_residual_compact.py
+```

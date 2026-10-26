@@ -7,7 +7,7 @@ import tempfile
 import time
 import numpy as np
 from . import storage as st,inputs as ip,prediction as pred,calibration as cal
-from .protocol import DOMAINS,BRANCHES,U,S
+from .protocol import DOMAINS,U,S
 from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation import evaluation as previous
 from DINOv3.MADEqual.aebad_s_support_witness_segment_p0 import evaluation as original
 from DINOv3.MADEqual.aebad_s_support_witness_segment_p0.execution import bounded_images
@@ -16,20 +16,20 @@ from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.scoring import image_metric
 read_csv=previous.read_csv
 
 
-def bind(function):
+def bind(function,a):
     # Bind immutable math/orchestration with OUR names, never mutate old globals.
     return FunctionType(function.__code__,dict(function.__globals__,st=st,ip=ip,pred=pred,cal=cal,
-        BRANCHES=BRANCHES,DOMAINS=DOMAINS,U=U,S=S,restored=restored),function.__name__,function.__defaults__)
+        BRANCHES=ip.plan(a)['branches'],DOMAINS=DOMAINS,U=U,S=S,restored=restored),function.__name__,function.__defaults__)
 
 
 def restored(a,domain):
-    value=bind(previous.restored)(a,domain)
+    value=bind(previous.restored,a)(a,domain)
     if value and (value['domain']!=domain or value['images']!=len([s for s in ip.catalog(a)['samples'] if s['domain']==domain])
             or value['numerical_failed_checks']!=0):raise ValueError('incomplete CPU domain state')
     return value
 
 
-def sample_work(a,s,states):return bind(previous.sample_work)(a,s,states)
+def sample_work(a,s,states):return bind(previous.sample_work,a)(a,s,states)
 
 
 @contextmanager
@@ -86,6 +86,7 @@ def evaluate_domain(a,domain):
     from DINOv3.MADEqual.aebad_s_support_witness_segment_p0.fresh_evaluation import mark_small
     check_isolation(a)
     if restored(a,domain):return dict(status='CPU_reused',domain=domain)
+    branches=ip.plan(a)['branches']
     samples=[s for s in ip.catalog(a)['samples'] if s['domain']==domain];states=pred.calibration_states(a,domain)
     count=sum((s['image_height']//4)*(s['image_width']//4) for s in samples)
     path=a.run_root/'evaluation'/domain;path.mkdir(parents=True,exist_ok=True)
@@ -93,10 +94,10 @@ def evaluate_domain(a,domain):
     cases={s['sample_id'] for label in (0,1) for s in [r for r in samples if r['label']==label][:2]}
     with scratch_arrays(a,domain) as allocate:
         arrays={'labels':allocate('labels',np.uint8,count)}
-        arrays.update({b:allocate(b,np.float32,count) for b in BRANCHES})
+        arrays.update({b:allocate(b,np.float32,count) for b in branches})
         for i,(s,maps,mask,sc,ck,inst,mr) in enumerate(bounded_images(samples,lambda s:sample_work(a,s,states),a.cpu_workers),1):
             n=mask.size;arrays['labels'][offset:offset+n]=mask.ravel()
-            for b in BRANCHES:arrays[b][offset:offset+n]=maps[b].ravel()
+            for b in branches:arrays[b][offset:offset+n]=maps[b].ravel()
             offset+=n;scores.extend(sc);checks.extend(ck);instances.extend(inst);records.extend(mr)
             if s['sample_id'] in cases:figure(maps,mask,s,path/'figures'/(s['sample_id']+'.png'))
             if i%25==0 or i==len(samples):print(f'[residual CPU maps] {domain} {i}/{len(samples)}',flush=True)
@@ -104,7 +105,7 @@ def evaluate_domain(a,domain):
         labels=arrays['labels'];positive=int(labels.sum(dtype=np.int64));metrics=[];proofs={}
         counts=dict(pixels=count,positive_pixels=positive,negative_pixels=count-positive)
         ps=st.sealed_json(a.run_root/'predictions'/(domain+'.json'))['seal']
-        for b in BRANCHES:
+        for b in branches:
             local_maps=[r for r in records if r['branch']==b];proof=parent_proof(a,domain,local_maps,b)
             if proof:
                 p=Path(proof['root'])/'evaluation'/domain/(b+'_exact_pixels.json')
@@ -128,7 +129,7 @@ def evaluate_domain(a,domain):
 
 def aupro(a,domain,b):
     from DINOv3.MADEqual.aebad_s_fixed_target_graph_p0.evaluation import validate_aupro
-    if b not in BRANCHES or not restored(a,domain):raise ValueError('complete CPU maps required')
+    if b not in ip.plan(a)['branches'] or not restored(a,domain):raise ValueError('complete CPU maps required')
     rows=[r for r in read_csv(a.run_root/'evaluation'/domain/'map_manifest.csv') if r['branch']==b]
     expected=dict(identity=ip.identity(a),domain=domain,branch=b,map_identity=st.digest(rows),nstrips=200,FPR_max=.3)
     destination=a.run_root/'aupro'/domain/(b+'.json')
@@ -143,14 +144,14 @@ def aupro(a,domain,b):
             value=dict(expected,AUPRO=old['AUPRO'],verified_images=len(rows),seconds=0.,backend=old['backend'],
                 origin='exact_parent_map_GT_population',parent=str(p),parent_sha256=st.sha(p))
             value['seal']=st.digest(value);st.write_json(destination,value);return value
-    return bind(previous.aupro)(a,domain,b)
+    return bind(previous.aupro,a)(a,domain,b)
 
 
 def evaluate(a,only_aupro=False):
     pred.verify(a)  # No GT decode until every one of the 926 predictions is frozen.
-    jobs=[]
+    jobs=[];branches=ip.plan(a)['branches']
     for d in DOMAINS:
         if only_aupro:
-            for b in BRANCHES:jobs.append(aupro(a,d,b))
+            for b in branches:jobs.append(aupro(a,d,b))
         else:jobs.append(evaluate_domain(a,d))
     return dict(status='requested_AUPRO_complete' if only_aupro else 'CPU_complete_AUPRO_pending',jobs=jobs)

@@ -32,6 +32,7 @@ def parser():
     p.add_argument('--sampling-scratch',type=Path,help='SSD private hot-layer staging for the two training-fold banks')
     p.add_argument('--no-write',action='store_true',help='preflight always read-only')
     p.add_argument('--reference-cache-gib',type=float,default=4.,help='bounded Exact reference tensor LRU; not a capacity admission check')
+    p.add_argument('--profile',choices=('compact_v1','full_v1'),default='compact_v1')
     p.add_argument('--smoke-mode',choices=('constructed','assets','prepared'),default='constructed')
     p.add_argument('--smoke-updates',type=int,default=30)
     return p
@@ -91,10 +92,16 @@ def normalize(a):
 
 def validate_runtime_inputs(a):
     frozen=st.sealed_json(a.run_root/'inputs.json')
-    if frozen['config']!=CONFIG or frozen['cache']!=str(a.cache_root) or frozen['query_mode']!=a.query_mode:raise ValueError('frozen runtime configuration differs')
+    cfg=ip.config(a);ip.plan(a)
+    if (frozen['config']!=(CONFIG if ip.legacy(a) else cfg) or frozen['cache']!=str(a.cache_root)
+            or frozen['query_mode']!=a.query_mode):raise ValueError('frozen runtime configuration differs')
+    if not ip.legacy(a):
+        if st.sealed_json(a.run_root/'resolved_config.json')['seal']!=frozen['resolved_config_seal'] or st.sealed_json(a.run_root/'job_plan.json')['seal']!=frozen['job_plan_seal']:raise ValueError('resolved config/job plan seal changed')
     if st.digest(ip.catalog(a))!=frozen['catalog']:raise ValueError('frozen image/support catalog changed')
     for relative,sha in frozen['code'].items():
-        if st.sha(ip.ROOT/relative)!=sha:raise ValueError('implementation changed after prepare: '+relative)
+        if st.sha(ip.ROOT/relative)!=sha:
+            legacy=st.read_json(Path(__file__).with_name('legacy_full_v1_compatibility.json'))['code']
+            if not ip.legacy(a) or not relative.startswith('DINOv3/MADEqual/aebad_s_reference_residual_segmentation/') or legacy.get(Path(relative).name)!=sha:raise ValueError('implementation changed after prepare: '+relative)
     e=frozen['extraction']
     offline=a.stage in ('evaluate','evaluate-aupro','summarize')
     if offline:
@@ -173,7 +180,7 @@ def pack(a):
 
 def common(a):
     values=[]
-    for k in ('run_root','cache_root','data','checkpoint','official_root','dinov3_root','device','cpu_workers','query_mode','evaluation_scratch','sampling_scratch','reference_cache_gib'):
+    for k in ('run_root','cache_root','data','checkpoint','official_root','dinov3_root','device','cpu_workers','query_mode','evaluation_scratch','sampling_scratch','reference_cache_gib','profile'):
         values.extend(('--'+k.replace('_','-'),str(getattr(a,k))))
     for k in ('recent_run','asset_manifest'):
         for p in getattr(a,k):values.extend(('--'+k.replace('_','-'),str(p)))

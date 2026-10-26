@@ -24,7 +24,9 @@ def extraction_record(a):
 
 def compatible(a,r,c,record):
     if r['catalog']['source']!=c['source'] or r['catalog']['supports']!=c['supports']:raise ValueError('Source/K8 order or image identity differs')
-    if r['kind']=='correspondence':
+    if r['kind']=='reference_residual':
+        if r['inputs']['extraction']!=record:raise ValueError('recent original extraction dependencies differ')
+    elif r['kind']=='correspondence':
         old=r['inputs']
         for k in ('checkpoint_sha256','host_config','external_code'):
             if old[k]!=record[k]:raise ValueError('recent extraction identity differs: '+k)
@@ -54,6 +56,15 @@ def physical(x,l,grid):
 def import_normal(a,row,providers):
     dest=ip.normal_path(a,row);meta0=dict(identity=ip.identity(a),image=row,kind='original_complete_grid')
     for r in providers:
+        if r['kind']=='reference_residual':
+            p=r['cache']/'normal_features'/ip.key(row)
+            if not (p/'manifest.json').exists():continue
+            x,record=st.get(p);raw_layers(x,record['metadata'])
+            if record['metadata'].get('kind')!='original_complete_grid':raise ValueError('adapted/sampled features cannot replace original complete grids')
+            if record['metadata']['image']!=row or st.sealed_json(r['run']/'prepared.json')['normal_features'][row['relative_path']]['seal']!=record['seal']:raise ValueError('parent original grid identity differs')
+            st.import_bundle(p,dest,{**{f'q{l}':f'q{l}' for l in LAYERS},'positions':'positions'},
+                dict(meta0,grid=record['metadata']['grid'],output_shape=record['metadata']['output_shape'],origin=str(p),origin_seal=record['seal']))
+            return True
         if r['kind']=='correspondence':
             p=r['cache']/'features'/ip.key(row)
             if not (p/'manifest.json').exists():continue
@@ -118,11 +129,12 @@ def prepare(a):
     bank=a.cache_root/'source_original';baseline=None;chosen_provider=None
     if not (bank/'manifest.json').exists():
         for r in providers:
-            if r['kind'] in ('correspondence','raw_manifest'):
-                p=r['cache']/'source_original' if r['kind']=='correspondence' else Path(r['record']['source_bank']['path'])
+            if r['kind'] in ('correspondence','reference_residual','raw_manifest'):
+                p=r['cache']/'source_original' if r['kind'] in ('correspondence','reference_residual') else Path(r['record']['source_bank']['path'])
                 if not (p/'manifest.json').exists():continue
                 _,br=st.get(p)
-                if r['kind']=='correspondence' and st.sealed_json(r['run']/'prepared.json')['source_seal']!=br['seal']:raise ValueError('parent original Source bank changed')
+                if r['kind']=='reference_residual' and br['metadata'].get('kind')!='original_source':raise ValueError('adapted bank cannot replace original Source')
+                if r['kind'] in ('correspondence','reference_residual') and st.sealed_json(r['run']/'prepared.json')['source_seal']!=br['seal']:raise ValueError('parent original Source bank changed')
                 if r['kind']=='raw_manifest' and (br['seal']!=r['record']['source_bank']['seal'] or br['metadata'].get('kind')!='original_source'):raise ValueError('not an original Source bank')
                 st.import_bundle(p,bank,{f'L{l}':f'L{l}' for l in LAYERS},dict(identity=ident,kind='original_source',origin=str(p),origin_seal=br['seal']));chosen_provider=r;break
             p=r['cache']/'source_bank.npz'
@@ -137,10 +149,10 @@ def prepare(a):
             st.put(bank,{f'L{l}':x[f'bank_{l}'] for l in LAYERS},dict(identity=ident,kind='original_source',origin='fresh_original_builder',builder=br['metadata']))
     else:
         _,br=st.get(bank);origin=br['metadata'].get('origin')
-        chosen_provider=next((r for r in providers if r['kind']=='correspondence' and str(r['cache']/'source_original')==origin),None)
+        chosen_provider=next((r for r in providers if r['kind'] in ('correspondence','reference_residual') and str(r['cache']/'source_original')==origin),None)
     # Baseline state can only come from the provider of the SAME original bank.
-    if chosen_provider and chosen_provider['kind']=='correspondence':
-        parent_mad=chosen_provider['run']/'calibration/source/UNION_K8.json'
+    if chosen_provider and chosen_provider['kind'] in ('correspondence','reference_residual'):
+        parent_mad=chosen_provider['run']/('input_distance_mad.json' if chosen_provider['kind']=='reference_residual' else 'calibration/source/UNION_K8.json')
         # A missing optional state uses fit_input_mad below, after normal grids
         # are ready. Existing invalid records must still fail sealed validation.
         if parent_mad.exists() or parent_mad.is_symlink():
@@ -198,7 +210,8 @@ def prepare(a):
 
 def synthesize(a):
     from DINOv3.MADEqual.aebad_s_support_witness_segment_p0.fresh_inputs import Data
-    c=ip.catalog(a);rows={r['relative_path']:r for r in ip.train_source(c)+sum(c['supports'].values(),[])};items=[]
+    from . import reuse
+    c=ip.catalog(a);cfg=ip.config(a);rows={r['relative_path']:r for r in ip.train_source(c)+sum(c['supports'].values(),[])};items=[];summaries=[]
     with Data(Path(c['data_root'])) as data:
         for row in rows.values():
             x,r=st.get(a.cache_root/'foreground'/ip.key(row));mask=x['mask'];image=np.asarray(data.image(row))
@@ -207,8 +220,9 @@ def synthesize(a):
             preview[fg]=np.round(.6*preview[fg]+.4*np.array([0,255,0])).astype(np.uint8)
             path=a.run_root/'previews/foreground'/(ip.key(row)+'.png');path.parent.mkdir(parents=True,exist_ok=True)
             picture=Image.fromarray(preview);picture.thumbnail((512,512));picture.save(path)
-        for item in synth.manifest(c):
+        for item in synth.manifest(c,cfg):
             p=a.cache_root/'synthetic_rgb'/item['item_id'];meta=p/'manifest.json'
+            if not meta.exists():reuse.synthetic(a,item)
             if not meta.exists():
                 row=rows[item['origin']];donor=rows[item['donor']];fg,fr=st.get(a.cache_root/'foreground'/ip.key(row))
                 clean=np.asarray(data.image(row));other=np.asarray(data.image(donor))
@@ -228,8 +242,18 @@ def synthesize(a):
             if r['identity']!=ip.identity(a) or r['item']!=item:raise ValueError('synthesis inputs changed')
             if r['status']=='valid' and st.sha(p/'image.png')!=r['rgb_sha256']:raise ValueError('synthetic RGB modified')
             items.append(dict(**item,status=r['status'],record_seal=r['seal']))
+            summaries.append(dict(origin=item['origin'],domain=rows[item['origin']].get('domain','Source'),variant=item['variant'],kind=item['kind'],
+                scale=('small','medium','large')[(item['variant']+st.seed(item['origin'])%3)%3],status=r['status'],reused='origin_seal' in r))
     st.sealed_json(a.run_root/'synthetic_manifest.json',dict(identity=ip.identity(a),items=items,
         valid=sum(r['status']=='valid' for r in items),invalid=sum(r['status']!='valid' for r in items)))
+    from collections import Counter
+    counts=Counter((r['domain'],r['kind'],r['scale'],r['status']) for r in summaries)
+    st.write_csv(a.run_root/'synthetic_type_scale_counts.csv',[dict(domain=d,kind=k,scale=s,status=status,count=n) for (d,k,s,status),n in sorted(counts.items())])
+    byorigin=[]
+    for origin,row in rows.items():
+        selected=[r for r in summaries if r['origin']==origin];valid=sum(r['status']=='valid' for r in selected)
+        byorigin.append(dict(origin=origin,population=row.get('domain','Source'),planned=len(selected),valid=valid,normal_only=valid==0))
+    st.write_csv(a.run_root/'synthetic_origin_summary.csv',byorigin);reuse.flush(a,'synthesize')
     return dict(status='fixed_synthetic_pool_recorded',slots=len(items),invalid=sum(r['status']!='valid' for r in items))
 
 
@@ -238,6 +262,14 @@ def existing_query(a,row):
     file=a.run_root/'eligible_raw_providers.json'
     if not file.exists():return None
     for provider in st.sealed_json(file)['providers']:
+        if provider['kind']=='reference_residual':
+            p=Path(provider['cache'])/'queries'/row['domain']/row['sample_id']
+            if not (p/'manifest.json').exists():continue
+            x,r=st.get(p);m=r['metadata']
+            if m['identity']!=provider['parent_identity'] or m['sample']!=row:raise ValueError('parent raw query identity differs')
+            geometry=dict(grid=m['grid'],positions=x['positions']);q={l:x[f'q{l}'] for l in LAYERS}
+            raw_layers({**{f'q{l}':q[l] for l in LAYERS},'positions':x['positions']},geometry)
+            return q,geometry,dict(origin=str(p),seal=r['seal'])
         if provider['kind']=='correspondence':
             p=Path(provider['cache'])/'queries'/row['domain']/row['sample_id']
             if not (p/'manifest.json').exists():continue
