@@ -143,3 +143,10 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [独立模块及工作站命令](DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/README.md)：三域固定K8与926张，SS/ST/TT正常伪对应、三种子残差网络、完整库逐行变换、每模型Source-only校准及固定z集成。仅接入迁移后fresh WITNESS和固定图两轮指定资产；无旧AutoDL依赖，缺失正常特征按原宿主补提取，不重跑图/WITNESS。单GPU、8 CPU worker上限、tmux、分阶段续跑及精确CPU/ADEval评价，不使用自定义Triton，不自动关机。
 
 包含评价scratch隔离修复：保护输入/父运行/cache，临时目录独立，分配失败只清理本次创建的文件。23项CPU测试中22项通过、1项因Windows软链接权限跳过；14份Python编译和Bash语法通过，真实DINO/CUDA/BF16训练及ADEval仍需正式运行验证。默认入口只读preflight，不安装环境或进行资源容量准入。
+
+
+## Target-normal参照残差分割学习与工程smoke
+
+[独立模块、完整公式与单卡工作站命令](DINOv3/MADEqual/aebad_s_reference_residual_segmentation/README.md)：固定三域K8与926张，正常RGB固定合成池、严格同源排除、Source预训练及三族分割头、三种子z集成、独立logit校准和原精确评价。复用兼容的原始Source库；父距离MAD缺失可走本轮原66张校准，损坏父记录仍拒绝。
+
+执行优化包含有界参照显存驻留、每查询层共享上传、训练按索引直接取参照行和同尺寸tile合批，保留原Exact及逐图损失。56项不同CPU测试通过；真实CUDA/BF16及全量结果尚未验证。提供constructed/assets/prepared独立smoke，记录数值、传输、训练/IO及成本外推；不把smoke写成正式完成。单GPU、最多8 CPU，无容量准入、自动安装、自定义Triton或关机。

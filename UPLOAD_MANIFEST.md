@@ -1,6 +1,6 @@
 # 上传范围
 
-仓库共523个版本管理文件，包含第二章代码、必要依赖、测试、运行说明和上游来源记录。追加内容见下方各节。
+仓库包含第二章代码、必要依赖、测试、运行说明和上游来源记录。追加内容见下方各节。
 
 不包含数据集、图片、权重、正式 memory/MAD、缓存、结果包、实验报告或本机盘点。
 少量非 AeBAD 目录文件为实际导入依赖；未整体纳入其独立实验。
@@ -674,4 +674,38 @@ DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/scripts/run_workstation
 DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/storage.py
 DINOv3/MADEqual/aebad_s_normal_correspondence_adaptation/training.py
 DINOv3/tests/test_aebad_s_normal_correspondence_adaptation.py
+```
+
+
+## 2026-10-26：参照残差分割学习及优化smoke
+
+新增独立工具、两个测试文件、固定名单身份元数据、CPU轻量验证记录与手动启动说明；不包含正式指标、真实缓存、模型或数据。138个共享Python依赖已与现有仓库逐文件核对，一致且无缺项，不改写旧方法。
+
+```text
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/__init__.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/calibration.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/evaluation.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/execution.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/frozen_origins.json
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/implementation_audit.md
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/inference.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/inputs.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/model.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/prediction.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/protocol.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/README.md
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/reporting.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/retrieval.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/runner.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/runtime.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/scripts/run_workstation.sh
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/smoke.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/storage.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/synthesis.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/tiles.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/training.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/training_data.py
+DINOv3/MADEqual/aebad_s_reference_residual_segmentation/validation_results.json
+DINOv3/tests/test_aebad_s_reference_residual_segmentation.py
+DINOv3/tests/test_reference_residual_execution.py
 ```

@@ -1,0 +1,189 @@
+{
+  "date": "2026-10-26T17:10:05.409885",
+  "status": "local_implementation_and_light_validation_complete_real_experiment_not_run",
+  "tests": [
+    {
+      "name": "new_module",
+      "tests": 45,
+      "passed": 45,
+      "skipped": 0,
+      "seconds": 108.628,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\final_45_tests.log",
+      "scope": "small_constructed_CPU_data_only"
+    },
+    {
+      "name": "final_metadata_and_OpenCV_rechecks",
+      "tests": 9,
+      "passed": 9,
+      "skipped": 0,
+      "seconds": 1.062,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\final_metadata_synthesis_tests.log",
+      "scope": "small_constructed_CPU_data_only"
+    },
+    {
+      "name": "correspondence_regression",
+      "tests": 23,
+      "passed": 22,
+      "skipped": 1,
+      "seconds": 22.862,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\correspondence_tests.log",
+      "scope": "small_constructed_CPU_data_only"
+    },
+    {
+      "name": "CH1_regression",
+      "tests": 15,
+      "passed": 15,
+      "skipped": 0,
+      "seconds": 5.935,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\ch1_tests.log",
+      "scope": "small_constructed_CPU_data_only"
+    },
+    {
+      "name": "parent_MAD_missing_valid_corrupt_resume",
+      "tests": 4,
+      "passed": 4,
+      "skipped": 0,
+      "seconds": 0.694,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\parent_mad_regression.log",
+      "scope": "production_prepare_and_bundle_path_with_constructed_bank_mocked_catalogue_and_calibration_only"
+    },
+    {
+      "name": "after_parent_MAD_fix_full_module",
+      "tests": 49,
+      "passed": 49,
+      "skipped": 0,
+      "seconds": 111.26,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\parent_mad_full_49_tests.log",
+      "scope": "small_constructed_CPU_data_only"
+    },
+    {
+      "name": "optimized_full_regression",
+      "tests": 55,
+      "passed": 55,
+      "skipped": 0,
+      "seconds": 111.454,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\optimized_full_tests.log",
+      "scope": "CPU_constructed_integration_and_execution_only"
+    },
+    {
+      "name": "optimized_execution_final",
+      "tests": 7,
+      "passed": 7,
+      "skipped": 0,
+      "seconds": 6.512,
+      "log": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\execution_final_tests.log",
+      "scope": "CPU_real_Exact_grouped_gradients_four_context_prepare_and_isolated_constructed_smoke"
+    }
+  ],
+  "python": "D:\\anaconda\\miniconda\\envs\\chinamoblie\\python.exe",
+  "compiled_Python_files": 21,
+  "local_preflight": {
+    "status": "blocked",
+    "errors": [],
+    "missing_inputs": [
+      {
+        "asset": "checkpoint",
+        "path": "G:\\codex\\workspace\\experiment\\external_baselines\\SuperADD\\weights\\dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth"
+      },
+      {
+        "asset": "backbone",
+        "path": "G:\\codex\\workspace\\experiment\\external_baselines\\dinov3\\hubconf.py"
+      }
+    ],
+    "missing_dependencies": [
+      "adeval"
+    ],
+    "torch_imported": false,
+    "experiment_directory_created": false,
+    "assets": [
+      {
+        "run": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\parent_metadata",
+        "status": "found_metadata; compatibility_and_payload_checked_in_prepare",
+        "kind": "correspondence",
+        "original_bank_present": false
+      },
+      {
+        "run": "G:\\codex\\workspace\\experiment\\.tmp\\reference_residual_tests\\parent_metadata",
+        "Source_training_complete": 0,
+        "Source_calibration_complete": 0,
+        "Target_complete": 0,
+        "Source_sampled_only": 0,
+        "query_mode": "stream",
+        "original_query_cache": "eligible only if full raw Q exists; z/distance/index are not features"
+      }
+    ]
+  },
+  "original_metadata": {
+    "Source": 521,
+    "background": 297,
+    "evaluation_GT_identities": 926,
+    "provenance": {
+      "archive": "aebad_correspondence_20261025_201937_review.tar.gz",
+      "catalog_seal": "e6301498271698b6afbdacbeed59690c4758a4f3ca0fafd565225b3d5ac4b3dc"
+    },
+    "note": "metadata only; remote payload presence and compatibility not established"
+  },
+  "actual_tests": {
+    "Torch_CPU_forward_backward_optimizer_resume": true,
+    "real_CPU_Exact_on_constructed_1280D_features": true,
+    "new_14_branch_calibration_prediction_and_exact_CPU_metrics": true,
+    "backbone_and_trained_head_provider_substituted_in_integration": true,
+    "integration_evaluation_population": "two constructed samples per domain, not real 926",
+    "real_GPU_or_DINO_or_ADEval": false,
+    "head_TF32_disabled_without_disabling_CuDNN_CPU_flag_validation": true,
+    "resident_Exact_CPU_values_indices_and_ties": true,
+    "selected_reference_rows_without_full_concat": true,
+    "grouped_head_CPU_per_image_losses_and_gradients": true,
+    "actual_four_context_training_preparation_CPU": true,
+    "isolated_constructed_CPU_smoke": true,
+    "server_GPU_smoke_executed": false
+  },
+  "pending": [
+    "remote original asset payload identities",
+    "real two-fold augmented Source sampler",
+    "actual foreground and synthesis pool quality",
+    "real full-grid extraction and retrieval",
+    "CUDA/BF16 numerics and throughput",
+    "33 full training jobs",
+    "66 domain-conditioned calibrations",
+    "926 formal predictions and exact evaluation",
+    "original ADEval CUDA AUPRO",
+    "actual RAM/VRAM/SSD/HDD cost"
+  ],
+  "server_connected": false,
+  "dependencies_installed": false,
+  "Git_pushed": false,
+  "custom_Triton": false,
+  "capacity_admission": false,
+  "automatic_shutdown": false,
+  "shell_syntax": "Git Bash bash -n: passed",
+  "review_fix": {
+    "date": "2026-10-26",
+    "issue": "missing_optional_parent_Source_MAD_blocks_original_bank_reuse",
+    "behavior": "missing parent state uses existing current common original bank calibration; existing invalid state rejected; committed current state reused",
+    "parent_files_unchanged": true,
+    "actual_66_image_calibration_executed": false,
+    "compiled_Python_files_after_fix": 18
+  },
+  "execution_optimization": {
+    "date": "2026-10-26",
+    "unique_tests_passing": 56,
+    "full_regression_run": 55,
+    "final_focused_run": 7,
+    "reference_LRU_default_GiB": 4,
+    "Exact_algorithm_changed": false,
+    "head_batch_grouping": "same_shape_only_per_image_loss_preserved",
+    "old_execution_training_bitwise_equivalence_claimed": false,
+    "optimizer_RNG_resume_regression_passed": true,
+    "GPU_smoke_handed_to_user": true,
+    "server_modes": [
+      "constructed",
+      "assets",
+      "prepared"
+    ],
+    "whole_runtime_measured": false,
+    "formal_updates_changed": false,
+    "custom_Triton": false,
+    "capacity_admission": false
+  }
+}
