@@ -768,3 +768,25 @@ DINOv3/tests/test_aebad_s_reference_residual_segmentation.py
 DINOv3/tests/test_reference_residual_compact.py
 DINOv3/tests/test_reference_residual_fast_reads.py
 ```
+
+## 2026-10-27：固定SACP独立工具
+
+仅新增固定SACP代码、CPU测试、运行说明与验证摘要；共享依赖保持原字节不变。本机local_preflight、测试原始日志、父实验元数据/结果、特征、memory、权重和数据均不上传。固定926张、六定位分支、18逻辑AUPRO、0训练；真实CUDA/提取和完整指标尚未执行。同步更新本仓库README与本清单。
+
+```text
+DINOv3/MADEqual/aebad_s_sacp_p0/__init__.py
+DINOv3/MADEqual/aebad_s_sacp_p0/clustering.py
+DINOv3/MADEqual/aebad_s_sacp_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_sacp_p0/inputs.py
+DINOv3/MADEqual/aebad_s_sacp_p0/numerics.py
+DINOv3/MADEqual/aebad_s_sacp_p0/prediction.py
+DINOv3/MADEqual/aebad_s_sacp_p0/protocol.py
+DINOv3/MADEqual/aebad_s_sacp_p0/reporting.py
+DINOv3/MADEqual/aebad_s_sacp_p0/runner.py
+DINOv3/MADEqual/aebad_s_sacp_p0/runtime.py
+DINOv3/MADEqual/aebad_s_sacp_p0/scripts/run_workstation.sh
+DINOv3/MADEqual/aebad_s_sacp_p0/README.md
+DINOv3/MADEqual/aebad_s_sacp_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_sacp_p0/validation_results.json
+DINOv3/tests/test_aebad_s_sacp.py
+```

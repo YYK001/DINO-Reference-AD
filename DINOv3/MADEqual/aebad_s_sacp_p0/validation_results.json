@@ -1,0 +1,204 @@
+{
+  "date": "2026-10-27",
+  "status": "local_CPU_implementation_verified_real_experiment_pending",
+  "tests": 26,
+  "seconds": 27.974,
+  "Python": "3.11.12 | packaged by conda-forge | (main, Apr 10 2025, 22:09:00) [MSC v.1943 64 bit (AMD64)]",
+  "versions": {
+    "numpy": "1.26.3",
+    "scipy": "1.14.1",
+    "Pillow": "10.2.0",
+    "torch": "2.5.1+cu121",
+    "scikit-learn": "1.5.2",
+    "psutil": "6.1.0"
+  },
+  "original_CPU_Exact": true,
+  "CUDA_initialized": false,
+  "real_model_forward_calls": 0,
+  "real_926_evaluation": false,
+  "real_ADEval_executed": false,
+  "integration_fixture": {
+    "Source_rows_per_layer": 64,
+    "dimension": 1280,
+    "patches_per_image": 16,
+    "query_images": 6,
+    "data_inventory": "fixture",
+    "GT": "fixture; used only after prediction freeze",
+    "math": "real shared CPU Exact + 12 small subspace fits + six-map scoring, exact pixels and instances",
+    "AUPRO": "18 reporting-only fixture records; no original backend invocation or reported experiment results"
+  },
+  "real_parent_UNION_SEGMENT_reproduction": "pending actual parent payloads and host; strict original tolerances unchanged",
+  "checks": [
+    "26 CPU tests",
+    "11 Python sources compiled without pycache",
+    "bash -n workstation script"
+  ],
+  "fixed_config_sha256": "5b5a90b99117e1d4d4a747fb7d4309f459a9a95312aa0004fc1314fd4de34e8a",
+  "job_plan": {
+    "version": "sacp_source_control_v1",
+    "fit_jobs": [
+      {
+        "domain": "background",
+        "layer": 7
+      },
+      {
+        "domain": "background",
+        "layer": 15
+      },
+      {
+        "domain": "background",
+        "layer": 23
+      },
+      {
+        "domain": "background",
+        "layer": 31
+      },
+      {
+        "domain": "illumination",
+        "layer": 7
+      },
+      {
+        "domain": "illumination",
+        "layer": 15
+      },
+      {
+        "domain": "illumination",
+        "layer": 23
+      },
+      {
+        "domain": "illumination",
+        "layer": 31
+      },
+      {
+        "domain": "view",
+        "layer": 7
+      },
+      {
+        "domain": "view",
+        "layer": 15
+      },
+      {
+        "domain": "view",
+        "layer": 23
+      },
+      {
+        "domain": "view",
+        "layer": 31
+      }
+    ],
+    "clustering_jobs": [
+      7,
+      15,
+      23,
+      31
+    ],
+    "prediction_images": 926,
+    "branches": [
+      "UNION_K8",
+      "SEGMENT_K8",
+      "SACP_CONTRAST",
+      "SACP_TARGET_DIR",
+      "SACP_SOURCE_DIR",
+      "SACP_MATCHED_UNIFORM"
+    ],
+    "primary": "SACP_CONTRAST",
+    "Source_control_images": 16,
+    "Target_support_images": 24,
+    "training_jobs": 0,
+    "localization_jobs": [
+      {
+        "domain": "background",
+        "branch": "UNION_K8"
+      },
+      {
+        "domain": "background",
+        "branch": "SEGMENT_K8"
+      },
+      {
+        "domain": "background",
+        "branch": "SACP_CONTRAST"
+      },
+      {
+        "domain": "background",
+        "branch": "SACP_TARGET_DIR"
+      },
+      {
+        "domain": "background",
+        "branch": "SACP_SOURCE_DIR"
+      },
+      {
+        "domain": "background",
+        "branch": "SACP_MATCHED_UNIFORM"
+      },
+      {
+        "domain": "illumination",
+        "branch": "UNION_K8"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SEGMENT_K8"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_CONTRAST"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_TARGET_DIR"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_SOURCE_DIR"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_MATCHED_UNIFORM"
+      },
+      {
+        "domain": "view",
+        "branch": "UNION_K8"
+      },
+      {
+        "domain": "view",
+        "branch": "SEGMENT_K8"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_CONTRAST"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_TARGET_DIR"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_SOURCE_DIR"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_MATCHED_UNIFORM"
+      }
+    ],
+    "maximum_new_AUPRO_jobs_with_compatible_baselines": 12,
+    "logical_AUPRO_jobs": 18,
+    "expected_metric_rows": 56,
+    "combined": "SEGMENT_SCORE_UNION_MAP",
+    "parameter_search": false
+  },
+  "pending": [
+    "review",
+    "authorized publication and server inventory",
+    "real Source grouping/residual statistics",
+    "926 shared original-host query forwards if no separate full-Q cache",
+    "real CUDA Exact and inherited baseline reproduction",
+    "full CPU evaluation",
+    "original ADEval AUPRO"
+  ],
+  "publication_check": {
+    "tests": 26,
+    "seconds": 29.241,
+    "scope": "isolated Git publish clone CPU-only; no CUDA initialization or real dataset execution",
+    "compiled_Python_files": 11,
+    "Bash_syntax": "passed"
+  }
+}

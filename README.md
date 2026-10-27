@@ -150,3 +150,9 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [独立模块、完整公式与单卡工作站命令](DINOv3/MADEqual/aebad_s_reference_residual_segmentation/README.md)：固定三域K8与926张，正常RGB固定合成池、严格同源排除、Source预训练及三族分割头、三种子z集成、独立logit校准和原精确评价。复用兼容的原始Source库；父距离MAD缺失可走本轮原66张校准，损坏父记录仍拒绝。
 
 执行优化包含有界参照显存驻留、每查询层共享上传、训练按索引直接取参照行和同尺寸tile合批，保留原Exact及逐图损失。56项不同CPU测试通过；真实CUDA/BF16及全量结果尚未验证。提供constructed/assets/prepared独立smoke，记录数值、传输、训练/IO及成本外推；不把smoke写成正式完成。单GPU、最多8 CPU，无容量准入、自动安装、自定义Triton或关机。
+
+## SACP：Source内部差异对照的条件化残差子空间修正
+
+[固定公式、资产要求及单卡工作站命令](DINOv3/MADEqual/aebad_s_sacp_p0/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_sacp_p0/implementation_audit.md)。复用迁移后原Source及A/B折库、固定K8和926张名单，图像均衡的未中心化二阶矩、共同低秩表示、广义特征对比与欧氏QR方向；比较UNION、SEGMENT、SACP及Target/Source方向、等量均匀缩距六张定位图。冻结同一Source patch/image MAD、CH1主评分和CURRENT补充，18项逻辑AUPRO，兼容基线可复用。
+
+默认仅preflight；缺折库阻断，不自动构库。若父stream查询未另存完整Q，926张须重新前向，每图一次供全部分支共享。无合成、梯度训练、自定义Triton、全量缓存SHA扫描、容量准入或自动关机。26项CPU测试通过，真实CUDA/原宿主926张复现及ADEval尚未验证；本机盘点与正式结果不在仓库中。
