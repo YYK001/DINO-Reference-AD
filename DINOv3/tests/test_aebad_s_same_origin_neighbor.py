@@ -89,6 +89,27 @@ class FormulaTests(unittest.TestCase):
 
 
 class OriginTests(unittest.TestCase):
+    def test_recovery_layout_can_read_real_PNG_via_original_Data_adapter(self):
+        """Exercise the exact missing-field boundary that failed on the server."""
+        import hashlib,io,zipfile
+        from PIL import Image
+        from DINOv3.MADEqual.aebad_s_support_witness_segment_p0.fresh_inputs import Data
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);relative='train/good/background/fixture.png'
+            image=Image.new('RGB',(1024,1024),(17,29,41));buf=io.BytesIO();image.save(buf,format='PNG');blob=buf.getvalue()
+            original=dict(relative_path=relative,image_sha256=hashlib.sha256(blob).hexdigest(),image_height=1024,image_width=1024,source_index=1,calibration=False)
+            rows=p.layout(dict(source=[dict(original,source_index=0,calibration=True),original]))
+            self.assertEqual(len(rows),1);self.assertEqual(rows[0]['image_sha256'],original['image_sha256'])
+            self.assertEqual(rows[0]['grid'],[40,40]);self.assertEqual(rows[0]['start'],0);self.assertEqual(rows[0]['stop'],1600)
+            archive=root/'AeBAD.zip'
+            with zipfile.ZipFile(archive,'w') as z:z.writestr('AeBAD/AeBAD_S/'+relative,blob)
+            expanded=root/'expanded';path=expanded/relative;path.parent.mkdir(parents=True);path.write_bytes(blob)
+            (expanded/'test').mkdir();(expanded/'ground_truth').mkdir()
+            for dataset in (archive,expanded):
+                with self.subTest(dataset=dataset.name),Data(dataset) as data:
+                    decoded=data.image(rows[0]);self.assertEqual(decoded.size,(1024,1024));self.assertEqual(decoded.getpixel((0,0)),(17,29,41))
+            self.assertEqual(original['calibration'],False);self.assertNotIn('grid',original)
+
     def test_original_builder_observer_preserves_sampler_values_indices_and_RNG(self):
         """Real original builder+100-round sampler, tiny synthetic CPU features.
         No real image assets, backbone, CUDA or formal bank is used.
@@ -293,6 +314,19 @@ class FeatureProviderTests(unittest.TestCase):
 
 
 class CalibrationAndExecutionTests(unittest.TestCase):
+    def test_stdout_EOF_before_process_exit_does_not_spin_heartbeat(self):
+        import contextlib,io,threading
+        from DINOv3.MADEqual.aebad_s_same_origin_neighbor_p0.runner import wait_for_child
+        # Closing stdout while the process cleans up reproduced the supervisor
+        # failure mode. Use an actual CPU child, no model/CUDA.
+        child=subprocess.Popen([sys.executable,'-c','import os,time; os.close(1); os.close(2); time.sleep(.12); raise SystemExit(1)'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+        reader=threading.Thread(target=child.stdout.read);reader.start();reader.join()
+        output=io.StringIO()
+        with contextlib.redirect_stdout(output):wait_for_child(child,reader,'fixture',heartbeat_seconds=.05)
+        child.stdout.close()
+        self.assertEqual(child.returncode,1)
+        self.assertLessEqual(output.getvalue().count('[heartbeat]'),3)
+
     def test_postprocessing_does_not_require_source_payload_or_old_indices(self):
         from DINOv3.MADEqual.aebad_s_same_origin_neighbor_p0 import runtime as rt
         with tempfile.TemporaryDirectory() as tmp:

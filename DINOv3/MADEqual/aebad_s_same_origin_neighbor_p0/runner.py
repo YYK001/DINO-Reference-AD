@@ -119,6 +119,18 @@ def execute(a):
     return summarize(a)
 
 
+def wait_for_child(child,reader,stage,heartbeat_seconds=30):
+    """Wait on process lifetime, not the stdout reader (which may finish first)."""
+    started=time.monotonic()
+    while True:
+        try:
+            child.wait(timeout=heartbeat_seconds)
+            break
+        except subprocess.TimeoutExpired:
+            print(f'[heartbeat] stage={stage} seconds={time.monotonic()-started:.0f}',flush=True)
+    reader.join()
+
+
 def main(argv=None):
     a=normalize(parser().parse_args(argv));a._started=time.perf_counter()
     if a.stage=='preflight':
@@ -139,11 +151,8 @@ def main(argv=None):
                     import threading
                     def copy():
                         for line in child.stdout:f.write(line);f.flush();print(line,end='',flush=True)
-                    reader=threading.Thread(target=copy,daemon=True);reader.start();started=time.monotonic()
-                    while child.poll() is None:
-                        reader.join(30)
-                        if child.poll() is None:print(f'[heartbeat] stage={stage} seconds={time.monotonic()-started:.0f}',flush=True)
-                    reader.join()
+                    reader=threading.Thread(target=copy,daemon=True);reader.start()
+                    wait_for_child(child,reader,stage)
                 if child.returncode:
                     status='paused_time_budget' if child.returncode==75 else 'stage_failed'
                     st.write_json(a.run_root/'pipeline_status.json',dict(status=status,stage=stage,success=False,exit_code=child.returncode));return child.returncode

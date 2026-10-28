@@ -10,7 +10,9 @@ def layout(catalog):
         # Original AeBAD images exceed the host's minimum crop size.
         h,w=int(r['image_height']*.625)//16,int(r['image_width']*.625)//16
         if min(h,w)<40:raise ValueError('use recorded actual augmented grid for non-AeBAD minimum-size inputs')
-        rows.append(dict(relative_path=r['relative_path'],source_index=r['source_index'],grid=[h,w],start=offset,stop=offset+h*w))
+        # Keep the original raster identity/header fields for the shared reader.
+        # A spatial-layout row is also passed to Data.image during recovery.
+        rows.append(dict(r,grid=[h,w],start=offset,stop=offset+h*w))
         offset+=h*w
     return rows
 

@@ -125,6 +125,8 @@ bash "$script" all --rebuild-source
 
 ## 本地验证记录
 
-2026-10-29：**33项CPU测试通过，13.977秒；13份Python文件语法检查通过**。可运行 `python -B -m unittest DINOv3.tests.test_aebad_s_same_origin_neighbor -v` 复核；本机validation和资产预检不上传。包含真实原builder/100轮采样器在7个小型替身输入上的前后对照（4维、每层10K行，仅CPU），验证bank值、选中索引及NumPy后续随机状态不变；不等于完成了正式455图/1280维/100K构库。另有66份人工4×4网格的两遍校准、独立图像MAD、分量缓存重放测试，以及预测冻结重入不加载模型、AUPRO后处理不依赖Source向量实体的测试。
+2026-10-29：**35项CPU测试通过，14.358秒；13份Python文件语法检查通过**。可运行 `python -B -m unittest DINOv3.tests.test_aebad_s_same_origin_neighbor -v` 复核；本机validation和资产预检不上传。包含真实原builder/100轮采样器在7个小型替身输入上的前后对照（4维、每层10K行，仅CPU），验证bank值、选中索引及NumPy后续随机状态不变；不等于完成了正式455图/1280维/100K构库。另有66份人工4×4网格的两遍校准、独立图像MAD、分量缓存重放测试，以及预测冻结重入不加载模型、AUPRO后处理不依赖Source向量实体的测试。
 
 新增检索与残差为FP32。既有SEGMENT小块端点几何继续使用其原FP64实现，以保留正式定义；没有将大规模NN改成FP64。
+
+真实准备阶段修复：Source空间layout保留原image_sha256/尺寸等完整图片记录，解决原Data.image取字段时的KeyError；ZIP与展开目录的真实PNG接入均有CPU回归。心跳等待改为等待子进程，避免错误退出时刷屏。不新增哈希或资源检查，已在首次读图前失败的运行可沿用同一目录续跑，无需重建Source。
