@@ -840,3 +840,7 @@ DINOv3/tests/test_aebad_s_blind_context.py
 ## 2026-10-28：盲点上下文1890输入尺寸接入修复
 
 仅修复新模块context/runtime/isolation及对应测试、说明、验证摘要。原预处理、裁块/拼接、正式Source、MAD和评分不改；不上传任何数据、缓存或正式结果。不改失败运行的冻结输入，服务器以新目录重试。新增6项CPU专项覆盖实际原宿主几何、非整除矩形、四相完整覆盖及边缘信息隔离；真实DINO/CUDA仍须服务器验证。
+
+## 2026-10-29 同源邻域差分检索
+
+新增独立模块 `DINOv3/MADEqual/aebad_s_same_origin_neighbor_p0/` 的12份Python源文件、README、实现审计和工作站脚本，以及 `DINOv3/tests/test_aebad_s_same_origin_neighbor.py`。包含特征提取配置/提供者manifest续跑绑定修复。上传代码、测试和说明；不上传delivery_manifest、本机validation/local_preflight、资产、权重或实验结果。测试使用已在仓库中的frozen_origins元数据，不依赖本机server_results。

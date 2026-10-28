@@ -170,3 +170,9 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 默认preflight不导入Torch；仅新增一个定位图和一项原ADEval AUPRO。完整预测重复执行保留原冻结记录及seal，会话计数独立记录，部分续跑只补缺失图。29项CPU夹具测试通过，包含续跑修复；真实骨干隔离、CUDA、吞吐、训练与五指标仍pending。单GPU、最多8 CPU，不安装依赖、自定义Triton、容量准入或自动关机；数据、权重、预检、日志与结果不上传。
 
 修复原宿主1890像素预处理输入的遮挡接入：保持原输入和floor16切窗，不再要求完整输入为16倍数；有效1888像素范围内构造遮挡，原宿主未消费的尾部像素原样保留。隔离覆盖右下角，原始裁块/拼接与CPU骨干替身共同回归验证；已有失败目录保留，新建目录重试，不重建Source或改变冻结检测器。
+
+## 同源邻域差分检索：固定background验证
+
+[方法、资源估计和工作站命令](DINOv3/MADEqual/aebad_s_same_origin_neighbor_p0/README.md)及[实现审计](DINOv3/MADEqual/aebad_s_same_origin_neighbor_p0/implementation_audit.md)。原seed42 K8与297图，455/66 Source划分及每层100K；比较UNION、SEGMENT、固定评分/定位组合、绝对邻居C1、相对差分C1及绝对Top16候选内的相对差分联合选择。无训练、参数搜索或扩域。
+
+优先沿原导入来源链恢复选中索引、实际增强及完整物理邻域；中心不吻合明确停止，仅显式选择才独立重建原Source并重评基线。新检索FP32、单GPU、最多8 CPU，原精确CPU/ADEval评价、分阶段续跑、12小时实测预算暂停与小报告打包。特征目录、提取配置和图像/提供者manifest绑定到运行身份，拒绝续跑混用；不添加容量准入、重复大文件SHA扫描、自定义Triton或关机。33项CPU测试通过，真实来源恢复、CUDA性能与完整指标尚待用户执行。
