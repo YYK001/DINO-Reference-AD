@@ -1,7 +1,7 @@
 {
   "date": "2026-10-28",
-  "tests": 29,
-  "seconds": 36.824,
+  "tests": 35,
+  "seconds": 40.73,
   "result": "passed",
   "Python": "3.11.12 | packaged by conda-forge | (main, Apr 10 2025, 22:09:00) [MSC v.1943 64 bit (AMD64)]",
   "versions": {
@@ -43,11 +43,36 @@
     "compiled_sources": 12
   },
   "publication_check": {
-    "tests": 29,
-    "seconds": 37.846,
+    "tests": 35,
+    "seconds": 40.73,
     "result": "passed",
-    "scope": "isolated publishing copy; CPU fixtures; no CUDA, real feature extraction or GPU evaluator",
+    "scope": "isolated publish copy; CPU fixtures including actual upstream preprocessing/crop/stitch and production adapters with fake DINO; no CUDA",
     "compiled_sources": 12,
-    "Bash_syntax": "passed"
+    "Bash_syntax": "previously passed; script unchanged"
+  },
+  "processed_shape_fix": {
+    "issue": "original processed 1890 input is not divisible by16",
+    "actual_processed_shape": [
+      1890,
+      1890
+    ],
+    "original_grid": [
+      118,
+      118
+    ],
+    "original_effective_pixels": [
+      1888,
+      1888
+    ],
+    "ignored_trailing_pixels": [
+      2,
+      2
+    ],
+    "tests": 6,
+    "focused_seconds": 4.481,
+    "scope": "actual upstream preprocessing and axis_patch_split, patched_features_and_relations, _extract_processed_batch; fake CPU backbone only",
+    "original_preprocessing_or_crop_stitch_changed": false,
+    "Source_bank_or_MAD_rebuilt": false,
+    "failed_run_preserved": true
   }
 }

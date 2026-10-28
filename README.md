@@ -168,3 +168,5 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [固定background工具、资产要求和工作站命令](DINOv3/MADEqual/aebad_s_blind_context_p0/README.md)及[实现审计](DINOv3/MADEqual/aebad_s_blind_context_p0/implementation_audit.md)。原seed42 K8、297张；在预处理后、切窗前做四相5×5块输入遮挡，64张Source辅助字典的值来自正式100K库，Target保留完整K8正常键和值。仅遮挡上下文选Source Top4及每支持Top1，32776参数注意力生成真实正常值凸组合，整图排除训练1500步，最终min原UNION距离；不改原MAD/CH1/CURRENT与精确评价。
 
 默认preflight不导入Torch；仅新增一个定位图和一项原ADEval AUPRO。完整预测重复执行保留原冻结记录及seal，会话计数独立记录，部分续跑只补缺失图。29项CPU夹具测试通过，包含续跑修复；真实骨干隔离、CUDA、吞吐、训练与五指标仍pending。单GPU、最多8 CPU，不安装依赖、自定义Triton、容量准入或自动关机；数据、权重、预检、日志与结果不上传。
+
+修复原宿主1890像素预处理输入的遮挡接入：保持原输入和floor16切窗，不再要求完整输入为16倍数；有效1888像素范围内构造遮挡，原宿主未消费的尾部像素原样保留。隔离覆盖右下角，原始裁块/拼接与CPU骨干替身共同回归验证；已有失败目录保留，新建目录重试，不重建Source或改变冻结检测器。

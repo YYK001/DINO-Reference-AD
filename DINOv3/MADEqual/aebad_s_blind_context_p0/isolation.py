@@ -11,8 +11,9 @@ def check_interventions(value,position,forward,synthesize):
     forward receives the globally masked input and returns [N,128] descriptors;
     synthesize accepts descriptors only, returns candidates, weights, reference.
     """
-    h,w=value.shape[-2:];grid=(h//16,w//16);y,x=divmod(int(position),grid[1]);phase=int(cx.phases(grid)[y,x])
-    y0,x0=(y//5)*80,(x//5)*80;y1,x1=min(y0+80,h),min(x0+80,w)
+    geometry=cx.mask_geometry(value.shape[-2:]);grid=geometry['grid'];eh,ew=geometry['effective_pixel_shape']
+    y,x=divmod(int(position),grid[1]);phase=int(cx.phases(grid)[y,x])
+    y0,x0=(y//5)*80,(x//5)*80;y1,x1=min(y0+80,eh),min(x0+80,ew)
     base=cx.masked_input(value,phase);context=forward(base);candidate,weight,reference=synthesize(context)
     records=[]
     for kind in ('constant','noise'):
@@ -23,7 +24,7 @@ def check_interventions(value,position,forward,synthesize):
         cc=forward(masked);ci,ww,rr=synthesize(cc)
         if not np.allclose(cc,context,atol=1e-7,rtol=1e-6):raise ValueError('context depends on hidden original contents')
         if not np.array_equal(ci,candidate) or not np.allclose(ww,weight,atol=1e-7,rtol=1e-6) or not np.allclose(rr,reference,atol=1e-7,rtol=1e-6):raise ValueError('candidate/weight/reference leaks hidden content')
-        records.append(dict(position=int(position),phase=phase,intervention=kind,range=[y0,y1,x0,x1],
+        records.append(dict(position=int(position),phase=phase,intervention=kind,range=[y0,y1,x0,x1],**geometry,
                             masked_input_equal=True,context_equal=True,candidates_equal=True,weights_equal=True,reference_equal=True))
     return records
 
@@ -45,7 +46,7 @@ def check(a):
         for row in selected:
             value=rt.processed(a,data.image(row)).detach().cpu().numpy();gh,gw=value.shape[-2]//16,value.shape[-1]//16
             # Image edge, an actual block edge, and interior of a non-edge block.
-            probes=list(dict.fromkeys([0,min(4,gh-1)*gw+min(4,gw-1),min(7,gh-1)*gw+min(7,gw-1)]))
+            probes=list(dict.fromkeys([0,min(4,gh-1)*gw+min(4,gw-1),min(7,gh-1)*gw+min(7,gw-1),gh*gw-1]))
             for pos in probes:
                 def forward(masked):
                     q,m=rt.forward_processed(a,torch.tensor(masked,device=a.device),np.array([pos],np.int64),context_only=True)

@@ -34,7 +34,7 @@ def forward_processed(a,value,selected=None,context_only=False):
     """Masking precedes this call; query_masks ONLY saves transfers, never creates blindness."""
     import torch
     from DINOv3.relation_reliability.superadd_host import _extract_processed_batch
-    host=model(a);gh,gw=value.shape[-2]//16,value.shape[-1]//16
+    host=model(a);geometry=cx.mask_geometry(value.shape[-2:]);gh,gw=geometry['grid']
     qm=None if selected is None else np.isin(np.arange(gh*gw),selected).reshape(gh,gw)
     with torch.inference_mode():
         pending=_extract_processed_batch(host,value,device=a.device,query_masks=[qm],include_identity_descriptors=False)[0]
@@ -46,12 +46,12 @@ def forward_processed(a,value,selected=None,context_only=False):
         with torch.inference_mode():
             output={l:torch.nn.functional.normalize(pending.queries[l].float()@a._projections[l],dim=-1,eps=1e-12).cpu().numpy() for l in LAYERS}
     else:output={l:pending.queries[l].detach().float().cpu().numpy() for l in LAYERS}
-    return output,dict(grid=[gh,gw],positions=pending.positions.copy())
+    return output,dict(**geometry,positions=pending.positions.copy())
 
 
 def masked_features(a,value,selected=None):
     """At most four complete extractions, each simultaneously returns four layers."""
-    grid=[value.shape[-2]//16,value.shape[-1]//16];n=int(np.prod(grid))
+    geometry=cx.mask_geometry(value.shape[-2:]);grid=geometry['grid'];n=int(np.prod(grid))
     pos=np.arange(n,dtype=np.int64) if selected is None else np.sort(np.asarray(selected,np.int64))
     labels=cx.phases(grid).ravel()[pos];keys={l:np.empty((len(pos),128),np.float32) for l in LAYERS};calls=0;crop_calls=0
     host=model(a);ny=len(host.patch_exec.axis_patch_split(value.shape[-2])[0]);nx=len(host.patch_exec.axis_patch_split(value.shape[-1])[0])
@@ -62,9 +62,9 @@ def masked_features(a,value,selected=None):
         q,m=forward_processed(a,masked,pos[take],context_only=True);calls+=1;crop_calls+=ny*nx
         if not np.array_equal(m['positions'],pos[take]):raise ValueError('masked row/physical position mapping differs')
         for l in LAYERS:keys[l][take]=q[l]
-    return keys,dict(grid=grid,positions=pos,phase=labels,processed_shape=list(value.shape[-2:]),
+    return keys,dict(**geometry,positions=pos,phase=labels,processed_shape=list(value.shape[-2:]),
                      masked_full_extractions=calls,host_internal_crop_forwards=crop_calls,
-                     mask='global normalized input zeros; 5x5 disjoint blocks, clipped edges')
+                     mask='global normalized input zeros; 5x5 disjoint full-patch blocks; original floor16 crop extent; unused trailing pixels unchanged')
 
 
 def original(a,row,data):

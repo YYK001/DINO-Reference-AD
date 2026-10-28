@@ -18,6 +18,119 @@ def small_dictionary():
     return dict(keys=keys,values=rng.normal(size=(len(images),1280)).astype(np.float32),images=images,types=types)
 
 
+def original_patch_classes():
+    """Compile the actual upstream classes without constructing/importing DINO."""
+    import ast,math,itertools,torch
+    source=ip.ROOT/'external_baselines/SuperADD/tracks/industrial/src/industrial/model.py'
+    tree=ast.parse(source.read_text(encoding='utf-8'))
+    classes=[n for n in tree.body if isinstance(n,ast.ClassDef) and n.name in ('PreProcessing','PatchedExecution')]
+    namespace=dict(torch=torch,np=np,ceil=math.ceil,floor=math.floor,product=itertools.product)
+    exec(compile(ast.Module(body=classes,type_ignores=[]),str(source),'exec'),namespace)
+    return namespace['PreProcessing'],namespace['PatchedExecution']
+
+
+def tiny_original_host():
+    """Real upstream crop/stitch geometry; only the expensive backbone is fake."""
+    import torch
+    _,PatchedExecution=original_patch_classes()
+    class FakeDino:
+        def __init__(self):self.calls=[]
+        def get_intermediate_layers(self,crops,n,norm=False):
+            self.calls.append(crops.clone())
+            pooled=torch.nn.functional.avg_pool2d(crops[:,:1],16,16).flatten(2).transpose(1,2)
+            global_context=crops.mean((1,2,3))[:,None,None]
+            channels=torch.arange(1280,dtype=torch.float32)[None,None]*.001
+            return tuple(pooled+global_context+channels+float(l)*.01 for l in n)
+    dino=FakeDino()
+    return SimpleNamespace(patch_exec=PatchedExecution(64,16,16),backbone=SimpleNamespace(dino=dino),layers=p.LAYERS)
+
+
+class OriginalHostGeometry(unittest.TestCase):
+    def test_real_preprocessor_keeps_1890_and_uneven_sizes(self):
+        import torch
+        from DINOv3.relation_reliability import superadd_host as shared
+        PreProcessing,PatchedExecution=original_patch_classes()
+        host=SimpleNamespace(preprocessing=PreProcessing('cpu',.625),patch_exec=PatchedExecution(640,128,16))
+        self.assertEqual(shared.preprocessed_spatial_shape(host,3024,3024),(1890,1890))
+        wrapper=shared._MinimumSpatialPreprocessing(host.preprocessing,host)
+        value=wrapper(torch.ones(1,3,1056,1040))
+        self.assertEqual(tuple(value.shape[-2:]),(660,650))
+        geometry=c.mask_geometry(value.shape[-2:])
+        self.assertEqual(geometry,dict(grid=[41,40],effective_pixel_shape=[656,640],ignored_trailing_pixels=[4,10]))
+        self.assertEqual(c.masked_input(value,0).shape,value.shape)
+        self.assertFalse(torch.cuda.is_initialized())
+
+    def test_real_axis_rois_align_global_tokens_and_exclude_tail(self):
+        _,PatchedExecution=original_patch_classes();execution=PatchedExecution(640,128,16)
+        for dim in (640,641,650,660,1890,1903):
+            inputs,predictions,results=execution.axis_patch_split(dim);covered=np.zeros(dim//16,np.uint8)
+            for (lo,hi),(p0,p1),(r0,r1) in zip(inputs,predictions,results):
+                self.assertEqual(lo%16,0);self.assertEqual(hi%16,0);self.assertLessEqual(hi,(dim//16)*16)
+                self.assertEqual(lo//16+p0,r0);self.assertEqual(lo//16+p1,r1);covered[r0:r1]+=1
+            np.testing.assert_array_equal(covered,1)
+            self.assertEqual(max(hi for _,hi in inputs),(dim//16)*16)
+
+    def test_1890_mask_covers_full_patches_once_and_preserves_unused_border(self):
+        value=np.ones((1,1,1890,1890),np.float32);count=np.zeros((1888,1888),np.uint8)
+        self.assertEqual(c.mask_geometry((1890,1890))['grid'],[118,118])
+        for phase in range(4):
+            masked=c.masked_input(value,phase);self.assertEqual(masked.shape,value.shape)
+            np.testing.assert_array_equal(masked[...,-2:,:],value[...,-2:,:])
+            np.testing.assert_array_equal(masked[...,:,-2:],value[...,:,-2:])
+            count+=(masked[0,0,:1888,:1888]==0)
+        np.testing.assert_array_equal(count,1)
+
+    def test_nonmultiple_numpy_Torch_masks_match_without_resize(self):
+        import torch
+        value=np.random.default_rng(19).normal(size=(1,3,193,211)).astype(np.float32)
+        for phase in range(4):
+            expected=c.masked_input(value,phase);actual=c.masked_input(torch.from_numpy(value),phase)
+            np.testing.assert_array_equal(actual.numpy(),expected)
+            np.testing.assert_array_equal(expected[...,192:,:],value[...,192:,:])
+            np.testing.assert_array_equal(expected[...,:,208:],value[...,:,208:])
+        self.assertFalse(torch.cuda.is_initialized())
+
+    def test_actual_original_crop_stitch_and_projection_on_nonmultiple_input(self):
+        import torch
+        host=tiny_original_host();a=SimpleNamespace(device='cpu')
+        value=torch.ones(1,3,161,179);pos=np.arange(110,dtype=np.int64)
+        with patch.object(rt,'model',return_value=host):
+            keys,m=rt.masked_features(a,value)
+        self.assertEqual(m['grid'],[10,11]);self.assertEqual(m['effective_pixel_shape'],[160,176]);self.assertEqual(m['ignored_trailing_pixels'],[1,3])
+        self.assertEqual(m['masked_full_extractions'],4);np.testing.assert_array_equal(m['positions'],pos)
+        self.assertEqual(len(host.backbone.dino.calls),4)
+        iy=host.patch_exec.axis_patch_split(161)[0];ix=host.patch_exec.axis_patch_split(179)[0]
+        for phase,crops in enumerate(host.backbone.dino.calls):
+            expected=c.masked_input(value,phase)
+            expected_crops=torch.cat([expected[:,:,y0:y1,x0:x1] for y0,y1 in iy for x0,x1 in ix])
+            torch.testing.assert_close(crops,expected_crops,atol=0,rtol=0)
+        for l in p.LAYERS:self.assertEqual(keys[l].shape,(110,128));self.assertTrue(np.isfinite(keys[l]).all())
+        self.assertFalse(torch.cuda.is_initialized())
+
+    def test_edge_interventions_use_actual_host_and_production_synthesizer(self):
+        import torch
+        from DINOv3.MADEqual.aebad_s_blind_context_p0.prediction import Synthesizer
+        host=tiny_original_host();a=SimpleNamespace(device='cpu');d=small_dictionary();states={l:c.initial_head(l) for l in p.LAYERS}
+        value=np.random.default_rng(8).normal(size=(1,3,161,179)).astype(np.float32);pos=109
+        with patch.object(rt,'model',return_value=host),patch.object(rt,'dictionary',return_value=(d,{})):
+            synthesizer=Synthesizer(a,states)
+            def forward(masked):
+                keys,m=rt.forward_processed(a,torch.tensor(masked),np.array([pos],np.int64),context_only=True)
+                return np.concatenate([keys[l] for l in p.LAYERS])
+            def generate(keys):
+                values=[];weights=[];indices=[]
+                for j,l in enumerate(p.LAYERS):
+                    v,w,ci=synthesizer.reference(l,keys[j:j+1],exclude_image=0,return_details=True)
+                    values.append(v);weights.append(w);indices.append(ci)
+                return np.concatenate(indices),np.concatenate(weights),np.concatenate(values)
+            rows=isolation.check_interventions(value,pos,forward,generate)
+        self.assertEqual(len(rows),2)
+        for r in rows:
+            self.assertEqual(r['range'],[80,160,160,176]);self.assertEqual(r['ignored_trailing_pixels'],[1,3]);self.assertTrue(r['reference_equal'])
+        self.assertEqual(len(host.backbone.dino.calls),3)
+        self.assertFalse(torch.cuda.is_initialized())
+
+
 class MaskAndIsolation(unittest.TestCase):
     def test_four_phases_cover_each_patch_once_and_pixels_match(self):
         grid=(12,13);masks=np.stack([c.patch_mask(grid,i) for i in range(4)])

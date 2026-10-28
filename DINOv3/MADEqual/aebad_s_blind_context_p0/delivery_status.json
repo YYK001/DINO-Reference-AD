@@ -4,7 +4,7 @@
   "profile": "blind_context_block5_v1",
   "completed": [
     "local implementation",
-    "29 CPU tests",
+    "35 CPU tests",
     "source compilation",
     "Bash syntax",
     "local preflight and frozen lists",
@@ -19,8 +19,16 @@
     "original five metrics/ADEval"
   ],
   "server_connected": false,
-  "GPU_experiment_started": false,
+  "GPU_experiment_started": true,
   "historical_results_or_window_record_modified": false,
   "interpretation": "implementation delivered for review; no detection performance claim",
-  "resume_fix": "fixed and CPU regression verified"
+  "resume_fix": "fixed and CPU regression verified",
+  "latest_user_run": {
+    "path": "/home/ubun/YYK/runs/aebad_s_blind_context_20261028_210324",
+    "status": "failed_before_first_masked_extraction",
+    "cause": "incorrect input multiple-of16 requirement",
+    "preserved": true,
+    "source": "user reported traceback"
+  },
+  "processed_shape_fix": "CPU regression verified; real CUDA rerun pending in new directory"
 }

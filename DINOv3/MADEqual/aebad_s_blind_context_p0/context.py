@@ -30,11 +30,26 @@ def patch_mask(grid, phase):
     return phases(grid)==phase
 
 
+def mask_geometry(processed_shape):
+    """Match original axis_patch_split: floor16 grid, unused trailing pixels.
+
+    E.g. the original 3024 * .625 preprocessing produces 1890 pixels;
+    the host consumes patch-aligned crops ending at 1888 (118 tokens).
+    We neither resize nor pad/crop the preprocessed tensor to change that rule.
+    """
+    h,w=map(int,processed_shape);gh,gw=h//16,w//16
+    if min(gh,gw)<1:raise ValueError('processed input has no full physical patch')
+    return dict(grid=[gh,gw],effective_pixel_shape=[gh*16,gw*16],ignored_trailing_pixels=[h-gh*16,w-gw*16])
+
+
 def masked_input(processed, phase):
     """Normalized [C,H,W] or [B,C,H,W]; zero BEFORE any host crop/split."""
     h,w=processed.shape[-2:]
-    if h%16 or w%16:raise ValueError('processed input must align with physical 16px patches')
-    pixels=np.repeat(np.repeat(patch_mask((h//16,w//16),phase),16,0),16,1)
+    geometry=mask_geometry((h,w));eh,ew=geometry['effective_pixel_shape']
+    # Only full physical patches have output tokens. The official cropper never
+    # reads the bottom/right remainder; leave those bytes exactly as supplied.
+    pixels=np.zeros((h,w),bool)
+    pixels[:eh,:ew]=np.repeat(np.repeat(patch_mask(geometry['grid'],phase),16,0),16,1)
     if isinstance(processed,np.ndarray):
         value=processed.copy();value[...,pixels]=0
     else:
