@@ -790,3 +790,24 @@ DINOv3/MADEqual/aebad_s_sacp_p0/implementation_audit.md
 DINOv3/MADEqual/aebad_s_sacp_p0/validation_results.json
 DINOv3/tests/test_aebad_s_sacp.py
 ```
+
+## 2026-10-28：SACP固定lambda=1缓存重放
+
+仅代码、CPU测试、说明和验证摘要；原SACP及共享依赖不修改。排除本机local_preflight、原始测试日志、父元数据/指标、预测缓存、数据、MAD及权重。只新增3分支、9 CPU像素作业、9 AUPRO；真实L1实验未执行，16项CPU夹具测试通过。另更新仓库README和本清单。
+
+```text
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/__init__.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/boundary.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/inputs.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/method.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/prediction.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/protocol.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/reporting.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/runner.py
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/scripts/run_workstation.sh
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/README.md
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_sacp_strength_p0/validation_results.json
+DINOv3/tests/test_aebad_s_sacp_strength.py
+```

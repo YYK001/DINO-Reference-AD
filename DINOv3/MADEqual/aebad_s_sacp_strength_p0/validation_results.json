@@ -1,0 +1,177 @@
+{
+  "date": "2026-10-28",
+  "status": "local_implementation_CPU_fixture_verified_real_replay_pending",
+  "tests": 16,
+  "seconds": 13.631,
+  "Python": "3.11.12 | packaged by conda-forge | (main, Apr 10 2025, 22:09:00) [MSC v.1943 64 bit (AMD64)]",
+  "versions": {
+    "numpy": "1.26.3",
+    "scipy": "1.14.1",
+    "Pillow": "10.2.0",
+    "scikit-learn": "1.5.2",
+    "psutil": "6.1.0"
+  },
+  "Torch_imported": false,
+  "CUDA_initialized": false,
+  "real_parent_arrays_replayed": 0,
+  "real_L1_metrics_computed": false,
+  "real_ADEval_executed": false,
+  "actual_fixture_scope": {
+    "query_images": 6,
+    "native_grid": [
+      4,
+      4
+    ],
+    "feature_dimension_for_parent_eta_fixture": 6,
+    "GT": "synthetic PNGs; includes vanished small components",
+    "inventory_populations_override": "two images per domain only in isolated test; production fixed926 tested by job_plan",
+    "computation": "original parent correct/matched_uniform; original CPU scoring, exact pixel and instance kernels; no model or feature extraction",
+    "AUPRO": "explicit synthetic metadata only for pending/completion/resume; backend not run",
+    "forbidden_function_profile_hits": 0,
+    "cpu_Torch_import_guard": true,
+    "replay_and_CPU_resume_verified": true,
+    "global_replay_commit_required_before_GT": true,
+    "parent_instance_values_not_loaded_during_replay": true
+  },
+  "zero_call_counters": {
+    "query_forward_calls": 0,
+    "exact_search_calls": 0,
+    "subspace_fit_calls": 0,
+    "training_updates": 0
+  },
+  "parent_production_Python_unchanged": true,
+  "static_checks": {
+    "compiled_Python_files": 10,
+    "workstation_Bash_syntax": "passed"
+  },
+  "plan": {
+    "version": "sacp_fixed_strength_l1_v1",
+    "primary": "SACP_CONTRAST_L1",
+    "prediction_images": 926,
+    "new_branches": [
+      "SACP_CONTRAST_L1",
+      "SACP_TARGET_DIR_L1",
+      "SACP_MATCHED_UNIFORM_L1"
+    ],
+    "CPU_pixel_jobs": [
+      {
+        "domain": "background",
+        "branch": "SACP_CONTRAST_L1"
+      },
+      {
+        "domain": "background",
+        "branch": "SACP_TARGET_DIR_L1"
+      },
+      {
+        "domain": "background",
+        "branch": "SACP_MATCHED_UNIFORM_L1"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_CONTRAST_L1"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_TARGET_DIR_L1"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_MATCHED_UNIFORM_L1"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_CONTRAST_L1"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_TARGET_DIR_L1"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_MATCHED_UNIFORM_L1"
+      }
+    ],
+    "AUPRO_jobs": [
+      {
+        "domain": "background",
+        "branch": "SACP_CONTRAST_L1"
+      },
+      {
+        "domain": "background",
+        "branch": "SACP_TARGET_DIR_L1"
+      },
+      {
+        "domain": "background",
+        "branch": "SACP_MATCHED_UNIFORM_L1"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_CONTRAST_L1"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_TARGET_DIR_L1"
+      },
+      {
+        "domain": "illumination",
+        "branch": "SACP_MATCHED_UNIFORM_L1"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_CONTRAST_L1"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_TARGET_DIR_L1"
+      },
+      {
+        "domain": "view",
+        "branch": "SACP_MATCHED_UNIFORM_L1"
+      }
+    ],
+    "historical_branches": [
+      "UNION_K8",
+      "SEGMENT_K8",
+      "SACP_CONTRAST",
+      "SACP_TARGET_DIR",
+      "SACP_SOURCE_DIR",
+      "SACP_MATCHED_UNIFORM",
+      "SEGMENT_SCORE_UNION_MAP"
+    ],
+    "main_table_branches": [
+      "UNION_K8",
+      "SEGMENT_K8",
+      "SACP_CONTRAST",
+      "SACP_TARGET_DIR",
+      "SACP_MATCHED_UNIFORM",
+      "SACP_CONTRAST_L1",
+      "SACP_TARGET_DIR_L1",
+      "SACP_MATCHED_UNIFORM_L1",
+      "SEGMENT_SCORE_UNION_MAP"
+    ],
+    "appendix_only_branches": [
+      "SACP_SOURCE_DIR"
+    ],
+    "new_metric_rows": 24,
+    "main_metric_rows": 72,
+    "complete_metric_rows": 80,
+    "query_forward_calls": 0,
+    "exact_search_calls": 0,
+    "subspace_fit_calls": 0,
+    "training_updates": 0
+  },
+  "pending": [
+    "review",
+    "actual parent payload availability check on original host",
+    "real lambda=.5 replay verification",
+    "real L1 CPU pixel/instance metrics",
+    "nine original ADEval jobs"
+  ],
+  "publication_check": {
+    "tests": 16,
+    "seconds": 14.087,
+    "scope": "isolated publish clone CPU-only fixtures; no real arrays or GPU",
+    "compiled_Python_files": 10,
+    "Bash_syntax": "passed"
+  }
+}

@@ -156,3 +156,9 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [固定公式、资产要求及单卡工作站命令](DINOv3/MADEqual/aebad_s_sacp_p0/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_sacp_p0/implementation_audit.md)。复用迁移后原Source及A/B折库、固定K8和926张名单，图像均衡的未中心化二阶矩、共同低秩表示、广义特征对比与欧氏QR方向；比较UNION、SEGMENT、SACP及Target/Source方向、等量均匀缩距六张定位图。冻结同一Source patch/image MAD、CH1主评分和CURRENT补充，18项逻辑AUPRO，兼容基线可复用。
 
 默认仅preflight；缺折库阻断，不自动构库。若父stream查询未另存完整Q，926张须重新前向，每图一次供全部分支共享。无合成、梯度训练、自定义Triton、全量缓存SHA扫描、容量准入或自动关机。26项CPU测试通过，真实CUDA/原宿主926张复现及ADEval尚未验证；本机盘点与正式结果不在仓库中。
+
+## SACP固定强度扩展：lambda=1
+
+[缓存重放、输入清单及工作站命令](DINOv3/MADEqual/aebad_s_sacp_strength_p0/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_sacp_strength_p0/implementation_audit.md)。父lambda=.5运行已在工作站完成；本扩展只消费父raw_union和eta前两轴，新增主方法、Target方向及等量均匀缩距三个L1分支。先按原容差重放核对.5，原MAD/位置/插值/CH1和CURRENT不变，仅9项新CPU像素评价与9项新AUPRO，历史结果只读注明来源。主表72行，完整附表80行，无Source方向L1或其他参数搜索。
+
+默认只读preflight，CPU路径禁止Torch导入；不需要Q、bank、折库、子空间向量、checkpoint或模型。单GPU仅用于显式原ADEval阶段，最多8个CPU工人，逐图/域/分支续跑，私有scratch和review打包排除大数组，不自动安装或关机。16项人工缓存/GT的CPU测试通过；真实缓存重放及L1指标仍待执行。本机预检、日志、数据和父缓存不上传。
