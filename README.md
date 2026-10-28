@@ -162,3 +162,9 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [缓存重放、输入清单及工作站命令](DINOv3/MADEqual/aebad_s_sacp_strength_p0/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_sacp_strength_p0/implementation_audit.md)。父lambda=.5运行已在工作站完成；本扩展只消费父raw_union和eta前两轴，新增主方法、Target方向及等量均匀缩距三个L1分支。先按原容差重放核对.5，原MAD/位置/插值/CH1和CURRENT不变，仅9项新CPU像素评价与9项新AUPRO，历史结果只读注明来源。主表72行，完整附表80行，无Source方向L1或其他参数搜索。
 
 默认只读preflight，CPU路径禁止Torch导入；不需要Q、bank、折库、子空间向量、checkpoint或模型。单GPU仅用于显式原ADEval阶段，最多8个CPU工人，逐图/域/分支续跑，私有scratch和review打包排除大数组，不自动安装或关机。16项人工缓存/GT的CPU测试通过；真实缓存重放及L1指标仍待执行。本机预检、日志、数据和父缓存不上传。
+
+## 5×5块盲点上下文正常参照合成
+
+[固定background工具、资产要求和工作站命令](DINOv3/MADEqual/aebad_s_blind_context_p0/README.md)及[实现审计](DINOv3/MADEqual/aebad_s_blind_context_p0/implementation_audit.md)。原seed42 K8、297张；在预处理后、切窗前做四相5×5块输入遮挡，64张Source辅助字典的值来自正式100K库，Target保留完整K8正常键和值。仅遮挡上下文选Source Top4及每支持Top1，32776参数注意力生成真实正常值凸组合，整图排除训练1500步，最终min原UNION距离；不改原MAD/CH1/CURRENT与精确评价。
+
+默认preflight不导入Torch；仅新增一个定位图和一项原ADEval AUPRO。完整预测重复执行保留原冻结记录及seal，会话计数独立记录，部分续跑只补缺失图。29项CPU夹具测试通过，包含续跑修复；真实骨干隔离、CUDA、吞吐、训练与五指标仍pending。单GPU、最多8 CPU，不安装依赖、自定义Triton、容量准入或自动关机；数据、权重、预检、日志与结果不上传。

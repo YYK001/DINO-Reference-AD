@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-28",
+  "tests": 29,
+  "seconds": 36.824,
+  "result": "passed",
+  "Python": "3.11.12 | packaged by conda-forge | (main, Apr 10 2025, 22:09:00) [MSC v.1943 64 bit (AMD64)]",
+  "versions": {
+    "numpy": "1.26.3",
+    "scipy": "1.14.1",
+    "Pillow": "10.2.0",
+    "torch": "2.5.1+cu121",
+    "scikit-learn": "1.5.2",
+    "psutil": "6.1.0"
+  },
+  "scope": "CPU synthetic fixtures only; actual Torch CPU adapter/attention/gradient/optimizer resume; original CPU score/exact pixel/instance kernels",
+  "CUDA_initialized": false,
+  "real_backbone_forwards": 0,
+  "real_training_updates": 0,
+  "real_ADEval_jobs": 0,
+  "compiled_sources": 12,
+  "Bash_syntax": "passed (D:/Git/Git/bin/bash.exe -n)",
+  "historical_SACP_production_files_unchanged": 10,
+  "runtime_pending": [
+    "real DINO globally masked input isolation",
+    "normal RGB throughput",
+    "CUDA candidates/attention",
+    "1500 updates on real cached normal population",
+    "297 frozen predictions",
+    "original five metrics/ADEval"
+  ],
+  "resume_fix": {
+    "issue": "per-invocation counters conflicted with immutable prediction freeze",
+    "regression_tests": 3,
+    "fixture_images": 297,
+    "scope": "actual predict/load/verified and runner predict dispatch; extraction/synthesizer stand-ins, no CUDA",
+    "covered": [
+      "complete repeat preserves frozen bytes/seal and prediction NPY bytes",
+      "partial resume recomputes one image only",
+      "legacy counter fields remain unchanged",
+      "inconsistent frozen records still rejected"
+    ],
+    "runtime_counters": "returned to per-session costs; excluded from new immutable freeze",
+    "compiled_sources": 12
+  },
+  "publication_check": {
+    "tests": 29,
+    "seconds": 37.846,
+    "result": "passed",
+    "scope": "isolated publishing copy; CPU fixtures; no CUDA, real feature extraction or GPU evaluator",
+    "compiled_sources": 12,
+    "Bash_syntax": "passed"
+  }
+}

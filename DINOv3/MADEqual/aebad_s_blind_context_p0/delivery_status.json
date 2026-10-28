@@ -1,0 +1,26 @@
+{
+  "status": "implementation_CPU_verified_real_experiment_pending",
+  "date": "2026-10-28",
+  "profile": "blind_context_block5_v1",
+  "completed": [
+    "local implementation",
+    "29 CPU tests",
+    "source compilation",
+    "Bash syntax",
+    "local preflight and frozen lists",
+    "README/manual server stages/report template"
+  ],
+  "pending": [
+    "real DINO globally masked input isolation",
+    "normal RGB throughput",
+    "CUDA candidates/attention",
+    "1500 updates on real cached normal population",
+    "297 frozen predictions",
+    "original five metrics/ADEval"
+  ],
+  "server_connected": false,
+  "GPU_experiment_started": false,
+  "historical_results_or_window_record_modified": false,
+  "interpretation": "implementation delivered for review; no detection performance claim",
+  "resume_fix": "fixed and CPU regression verified"
+}
