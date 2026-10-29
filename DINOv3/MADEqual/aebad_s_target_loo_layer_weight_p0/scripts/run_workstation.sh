@@ -4,7 +4,10 @@ work=${WORK_ROOT:-/home/ubun/YYK}
 repo=${PROJECT_ROOT:-$work/DINO-Reference-AD}
 py=${PYTHON:-$work/conda_envs/yyk/bin/python}
 stage=${1:-preflight}; if [ "$#" -gt 0 ]; then shift; fi
-run=${RUN_ROOT:-$work/runs/aebad_target_loo_weight_seed42_v1}
+domain=${DOMAIN:-background}
+default_run="$work/runs/aebad_target_loo_weight_seed42_v1"
+if [ "$domain" != background ]; then default_run="$work/runs/aebad_target_loo_weight_${domain}_seed42_v1"; fi
+run=${RUN_ROOT:-$default_run}
 tag=$(basename "$run")
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 export XDG_CACHE_HOME="$work/.cache" MPLBACKEND=Agg TMPDIR="$work/tmp"
@@ -13,7 +16,10 @@ if [ "$stage" = aupro ] || [ "$stage" = all ] || [[ " $* " == *" --supplement-re
   export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
 fi
 cd "$repo"
+source_args=()
+if [ "$domain" != background ]; then source_args=(--source-stats-run "${SOURCE_STATS_RUN:-$work/runs/aebad_target_loo_weight_seed42_20261029_182735}"); fi
 exec "$py" -B -u -m DINOv3.MADEqual.aebad_s_target_loo_layer_weight_p0.runner "$stage" \
+ --domain "$domain" "${source_args[@]}" \
  --run-root "$run" --cache-root "${CACHE_ROOT:-$work/storage/layer_weight_cache/$tag}" \
  --evaluation-scratch "${EVALUATION_SCRATCH:-$work/tmp/${tag}_pixels}" \
  --parent-run "${PARENT_RUN:-$work/runs/aebad_s_sacp_seed42_20261028_011454}" \

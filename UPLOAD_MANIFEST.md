@@ -866,3 +866,32 @@ DINOv3/tests/test_aebad_s_target_loo_layer_weight.py
 ```
 
 不含validation_results、local_asset_notes、local_preflight、数据、权重、预测或服务器结果；固定协议由protocol.py提供。
+
+
+## Target-LOO固定跨域扩展（2026-10-29）
+
+更新原模块并增加域父读取、固定组合、域汇总、只读三域宏平均与跨域协调脚本，补齐强参照命名回归：
+
+```text
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/__init__.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/aggregation.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/composition.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/inputs.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/numerics.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/parent.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/pipeline.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/protocol.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/reporting.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/reporting_domain.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/runner.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/CROSSDOMAIN.md
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/README.md
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/scripts/run_crossdomain.sh
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/scripts/run_workstation.sh
+DINOv3/tests/test_aebad_s_target_loo_layer_weight.py
+DINOv3/tests/test_aebad_s_target_loo_layer_weight_domains.py
+```
+
+不含validation_results.json、local_asset_notes.json、local_preflight.log或outputs、server_results、数据/权重/缓存。原background大数组与结果不修改、不上传。

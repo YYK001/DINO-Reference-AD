@@ -5,6 +5,9 @@ from .protocol import NEW,TARGET,SOURCE,U,S,COMBINED
 
 
 def summarize(a):
+    if ip.domain(a)!='background':
+        from .reporting_domain import summarize as domain_summary
+        return domain_summary(a)
     from .evaluation import restored
     pending=[];rows=[]
     if restored(a):rows=ip.old.read_csv(a.run_root/'evaluation/metrics.csv')

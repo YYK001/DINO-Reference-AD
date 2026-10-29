@@ -5,7 +5,7 @@ import tempfile,time
 import numpy as np
 from . import inputs as ip,pipeline as pp
 from .inputs import st
-from .protocol import NEW,READOUTS,U,S
+from .protocol import NEW,READOUTS,U,S,COMBINATIONS
 from DINOv3.MADEqual.aebad_s_support_witness_segment_p0 import evaluation as old
 from DINOv3.MADEqual.aebad_s_ch1_scoring_inheritance.scoring import image_metrics
 
@@ -44,7 +44,7 @@ def evaluate(a):
     parent_maps={(r['sample_id'],r['branch']):r for r in p.table('map_manifest.csv')}
     count=sum((r['image_height']//4)*(r['image_width']//4) for r in p.samples)
     from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation.calibration import response
-    scores=[];records=[];checks=[];offset=0
+    scores=[];records=[];checks=[];offset=0;combined=[]
     with scratch(a,count) as (labels,values):
         for i,row in enumerate(p.samples,1):
             x,r=pp.prediction(a,row);baseline,m=p.prediction(row);meta=m['metadata'];gt=mask(a,row,meta['output_shape'])
@@ -52,29 +52,40 @@ def evaluate(a):
                 image,sc=response(baseline[b],baseline['positions'],meta['grid'],meta['output_shape'],p.mad['image'])
                 old.shared.verify_map_record(parent_maps[row['sample_id'],b],image,gt)
                 if any(abs(sc[k]-meta['scores'][b][k])>1e-5 for k in ('CH1','CURRENT')):raise ValueError('parent score mismatch')
-                checks.append(dict(sample_id=row['sample_id'],branch=b,verified=True,map_GT='exact_parent_hash',score_atol=1e-5))
+                checks.append(dict(domain=ip.domain(a),sample_id=row['sample_id'],branch=b,verified=True,map_GT='exact_parent_hash',score_atol=1e-5))
+                if ip.domain(a)!='background':scores.append(dict(domain=ip.domain(a),sample_id=row['sample_id'],branch=b,label=row['label'],**sc))
+            if ip.domain(a)!='background':
+                from .composition import image_scores
+                expected=image_scores(meta['scores'][S])
+                if r['metadata'].get('combination_image_scores')!=expected:raise ValueError('frozen combination score differs from SEGMENT')
+                for b,sc in expected.items():scores.append(dict(domain=ip.domain(a),sample_id=row['sample_id'],branch=b,label=row['label'],**sc))
             n=gt.size;labels[offset:offset+n]=gt.ravel()
             for b in NEW:
                 if x[b].shape!=gt.shape or x[b].dtype!=np.float32 or not np.isfinite(x[b]).all():raise ValueError('invalid weighted map')
                 values[b][offset:offset+n]=x[b].ravel()
-                scores.append(dict(sample_id=row['sample_id'],branch=b,label=row['label'],**r['metadata']['scores'][b]))
-                records.append(dict(domain='background',sample_id=row['sample_id'],branch=b,output_height=gt.shape[0],output_width=gt.shape[1],map_float32_sha256=old.shared.array_sha(x[b]),mask_uint8_sha256=old.shared.array_sha(gt)))
+                scores.append(dict(domain=ip.domain(a),sample_id=row['sample_id'],branch=b,label=row['label'],**r['metadata']['scores'][b]))
+                records.append(dict(domain=ip.domain(a),sample_id=row['sample_id'],branch=b,output_height=gt.shape[0],output_width=gt.shape[1],map_float32_sha256=old.shared.array_sha(x[b]),mask_uint8_sha256=old.shared.array_sha(gt)))
+            if ip.domain(a)!='background':
+                for b,ref in COMBINATIONS.items():
+                    mr=next(v for v in records[-2:] if v['branch']==ref)
+                    combined.append(dict(mr,branch=b,map_reference=ref,image_reference=S,no_new_map=True))
             offset+=n
-            if i%25==0:print(f'[layer weights CPU] {i}/297',flush=True)
-            pp.guard(a,'evaluate',i,297)
+            if i%25==0:print(f'[layer weights CPU] {i}/{ip.count(a)}',flush=True)
+            pp.guard(a,'evaluate',i,ip.count(a))
         if offset!=count:raise ValueError('incomplete exact pixel population')
         positive=int(labels.sum(dtype=np.int64));counts=dict(pixels=count,positive_pixels=positive,negative_pixels=count-positive)
         metrics=[]
         for b in NEW:
             maps=[r for r in records if r['branch']==b]
-            pix=old.exact_pixel_result(out/(b+'_exact_pixels.json'),ip.identity(a),st.digest(maps),labels,values[b],domain='background',branch=b,prediction_sha=frozen['seal'],counts=counts)
+            pix=old.exact_pixel_result(out/(b+'_exact_pixels.json'),ip.identity(a),st.digest(maps),labels,values[b],domain=ip.domain(a),branch=b,prediction_sha=frozen['seal'],counts=counts)
             ss=[r for r in scores if r['branch']==b]
-            for rule in READOUTS:metrics.append(dict(domain='background',branch=b,scoring=rule,image_count=297,**image_metrics([r['label'] for r in ss],[r[rule] for r in ss]),pixel_AUROC=pix['AUROC'],pixel_AP=pix['AP'],AUPRO=None,metric_origin='new_weighted_map_exact_CPU'))
+            for rule in READOUTS:metrics.append(dict(domain=ip.domain(a),branch=b,scoring=rule,image_count=ip.count(a),**image_metrics([r['label'] for r in ss],[r[rule] for r in ss]),pixel_AUROC=pix['AUROC'],pixel_AP=pix['AP'],AUPRO=None,metric_origin='new_weighted_map_exact_CPU'))
     metrics.extend(dict(r,metric_origin='parent_map_GT_scores_population_verified') for r in p.metrics)
     tables={'metrics.csv':metrics,'per_image_scores.csv':scores,'map_manifest.csv':records,'numerical_verification.csv':checks}
+    if ip.domain(a)!='background':tables['combination_manifest.csv']=combined
     for name,rows in tables.items():st.write_csv(out/name,rows)
     names=list(tables)+[b+s for b in NEW for s in ('_exact_pixels.json','_exact_pixels.seal.json')]
-    return st.sealed_json(out/'status.json',dict(identity=ip.identity(a),prediction_seal=frozen['seal'],images=297,files={name:st.sha(out/name) for name in names},numerical_failed_checks=0))
+    return st.sealed_json(out/'status.json',dict(identity=ip.identity(a),prediction_seal=frozen['seal'],images=ip.count(a),files={name:st.sha(out/name) for name in names},numerical_failed_checks=0))
 
 
 def aupro(a):
@@ -89,7 +100,7 @@ def aupro(a):
     for b in NEW:
         records=[r for r in allmaps if r['branch']==b]
         if [r['sample_id'] for r in records]!=[s['sample_id'] for s in ip.parent(a).samples]:raise ValueError('AUPRO population differs')
-        expected=dict(identity=ip.identity(a),domain='background',branch=b,map_identity=st.digest(records),nstrips=200,FPR_max=.3)
+        expected=dict(identity=ip.identity(a),domain=ip.domain(a),branch=b,map_identity=st.digest(records),nstrips=200,FPR_max=.3)
         dest=a.run_root/'aupro'/(b+'.json')
         if dest.exists():v=st.read_json(dest);validate_aupro(v,expected)
         else:
@@ -98,8 +109,8 @@ def aupro(a):
                 x,_=pp.prediction(a,row);gt=mask(a,row,x[b].shape)
                 old.shared.verify_map_record(record,x[b],gt);maps.append(x[b]);masks.append(gt)
             torch.cuda.set_device(torch.device(a.device));torch.cuda.reset_peak_memory_stats()
-            v=dict(expected,AUPRO=float(official_aupro_adeval(masks,maps,nstrips=200)),verified_images=297,seconds=time.perf_counter()-tick,backend='original_ADEval_1.1.0_CUDA')
+            v=dict(expected,AUPRO=float(official_aupro_adeval(masks,maps,nstrips=200)),verified_images=ip.count(a),seconds=time.perf_counter()-tick,backend='original_ADEval_1.1.0_CUDA')
             v['seal']=st.digest(v);validate_aupro(v,expected);st.write_json(dest,v)
-        if v['verified_images']!=297:raise ValueError('partial AUPRO')
+        if v['verified_images']!=ip.count(a):raise ValueError('partial AUPRO')
         result.append(v);pp.guard(a,'aupro',len(result),2)
     return dict(status='requested_AUPRO_complete',jobs=len(result))

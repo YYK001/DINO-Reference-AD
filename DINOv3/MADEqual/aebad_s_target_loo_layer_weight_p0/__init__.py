@@ -1,1 +1,1 @@
-"""Fixed background Target-normal LOO layer weighting; no training."""
+"""Fixed per-domain Target-normal LOO layer weighting; no training."""

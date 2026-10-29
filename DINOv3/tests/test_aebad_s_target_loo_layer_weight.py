@@ -63,6 +63,26 @@ class WeightsTests(unittest.TestCase):
             with self.subTest(weights=w.tolist()),self.assertRaisesRegex(ValueError,'four positive normalized'):
                 nm.weighted(z,pos,(5,7),(17,23),w)
 
+    def test_summary_includes_fixed_parent_task_division_comparison(self):
+        from DINOv3.MADEqual.aebad_s_target_loo_layer_weight_p0 import reporting
+        from DINOv3.MADEqual.aebad_s_target_loo_layer_weight_p0.protocol import U,S,TARGET
+        from DINOv3.MADEqual.aebad_s_blind_context_p0.protocol import COMBINED
+        with tempfile.TemporaryDirectory() as tmp:
+            a=SimpleNamespace(run_root=Path(tmp));out=a.run_root/'evaluation';out.mkdir()
+            rows=[]
+            for b in (U,S,COMBINED,*NEW):
+                for scoring in (('PEAK_LOCAL_WEIGHT','WEIGHTED_MAP_MAX') if b in NEW else ('CH1','CURRENT')):
+                    rows.append(dict(branch=b,scoring=scoring,**{k:.5 for k in ('image_AUROC','image_AP','pixel_AUROC','pixel_AP','AUPRO')}))
+            ip.st.write_csv(out/'metrics.csv',rows);ip.st.write_csv(out/'map_manifest.csv',[])
+            for b in NEW:
+                v=dict(identity='fixture',domain='background',branch=b,map_identity=ip.st.digest([]),nstrips=200,FPR_max=.3,AUPRO=.5,verified_images=297,backend='original_ADEval_1.1.0_CUDA')
+                v['seal']=ip.st.digest(v);ip.st.write_json(a.run_root/'aupro'/(b+'.json'),v)
+            with patch('DINOv3.MADEqual.aebad_s_target_loo_layer_weight_p0.evaluation.restored',return_value=dict(images=297)),patch.object(ip,'identity',return_value='fixture'):
+                reporting.summarize(a)
+            comparisons=ip.old.read_csv(a.run_root/'metric_comparisons.csv')
+            strong=[r for r in comparisons if r['branch']==TARGET and r['reference']==COMBINED]
+            self.assertEqual(len(comparisons),30);self.assertEqual(len(strong),5)
+
     def test_whole_support_exclusion_all_patch_rows(self):
         supports=[dict(relative_path=f'support_{i}',rows=31+i) for i in range(8)]
         for held in range(8):

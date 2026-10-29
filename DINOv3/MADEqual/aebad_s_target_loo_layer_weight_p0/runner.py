@@ -3,12 +3,15 @@ import argparse,os,sys,time,json,tarfile,subprocess,threading
 from pathlib import Path
 from . import inputs as ip
 from .inputs import st
-from .protocol import CONFIG,STAGES
+from .protocol import CONFIG,STAGES,COUNTS,config
 
 
 def parser():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('stage',nargs='?',default='preflight',choices=('preflight',*STAGES,'all','pack'))
+    p.add_argument('stage',nargs='?',default='preflight',choices=('preflight',*STAGES,'all','pack','aggregate'))
+    p.add_argument('--domain',choices=tuple(COUNTS),default='background')
+    for name in ('source-stats-run','background-run','illumination-run','view-run'):p.add_argument('--'+name,type=Path)
+    p.add_argument('--budget-peer-run',type=Path,action='append',default=[])
     for name in ('parent-run','parent-cache','raw-run','raw-cache','evaluation-scratch') :p.add_argument('--'+name,type=Path)
     p.add_argument('--run-root',type=Path,default=ip.ROOT/'DINOv3/outputs/mad_equal/aebad_target_loo_weight_seed42_v1')
     p.add_argument('--cache-root',type=Path)
@@ -27,8 +30,11 @@ def parser():
 def normalize(a):
     for k,v in vars(a).copy().items():
         if isinstance(v,Path):setattr(a,k,v.resolve())
+    default=(ip.ROOT/'DINOv3/outputs/mad_equal/aebad_target_loo_weight_seed42_v1').resolve()
+    if a.domain!='background' and a.run_root==default:a.run_root=default.with_name('aebad_target_loo_weight_'+a.domain+'_seed42_v1')
     for k,suffix in [('cache_root','_cache'),('evaluation_scratch','_pixels')]:setattr(a,k,(getattr(a,k) or a.run_root.with_name(a.run_root.name+suffix)).resolve())
-    protected=[p for p in (a.parent_run,a.parent_cache,a.raw_run,a.raw_cache,a.data,a.checkpoint,a.official_root,a.dinov3_root) if p]
+    a.budget_peer_run=[p.resolve() for p in a.budget_peer_run]
+    protected=[p for p in (a.parent_run,a.parent_cache,a.raw_run,a.raw_cache,a.data,a.checkpoint,a.official_root,a.dinov3_root,a.source_stats_run,a.background_run,a.illumination_run,a.view_run,*a.budget_peer_run) if p]
     if a.parent_run and (a.parent_run/'assets.json').exists():protected.append(Path(st.read_json(a.parent_run/'assets.json')['references']['source']['path']).resolve())
     def overlap(x,y):return x==y or x.is_relative_to(y) or y.is_relative_to(x)
     destinations=[a.run_root,a.cache_root,a.evaluation_scratch]
@@ -51,8 +57,11 @@ def pack(a):
 def execute(a):
     if a.stage=='preflight':return ip.preflight(a)
     if a.stage=='pack':return pack(a)
+    if a.stage=='aggregate':
+        from .aggregation import aggregate
+        return aggregate(a)
+    st.sealed_json(a.run_root/'protocol.json',config(ip.domain(a)))
     ip.freeze(a)
-    st.sealed_json(a.run_root/'protocol.json',CONFIG)
     if a.stage in ('prepare-normal-stats','fit-weights','predict'):
         from . import pipeline
         return getattr(pipeline,a.stage.replace('-','_'))(a)

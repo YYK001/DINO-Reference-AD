@@ -181,3 +181,8 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 ## Target-LOO正常统计层加权
 
 [固定公式、资产与工作站入口](DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/README.md)，[实现审计](DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/implementation_audit.md)。background seed42 K8、297张，冻结原UNION检索与Source MAD，比较Source单侧正偏离新加权和Source/Target正常整图留一混合加权（gamma=0/.5）。两种新图像读出、两项新增原ADEval AUPRO，兼容原基线只读复用。默认preflight，无训练或搜索，不自动构库或提取；显式补正常检索、阶段续跑、单GPU、12h预算暂停。19项CPU测试通过，含FP32权重求和舍入修复；真实检索与完整GPU评价尚待运行。本机预检、结果、缓存和权重不上传。
+
+
+## Target-LOO固定跨域验证
+
+[illumination/view扩展、资源估计与单卡手动入口](DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/CROSSDOMAIN.md)。完整域参数贯穿父资产读取，265/364图、每域原seed42 K8；只读导入background Source66统计，检查共同依赖及gamma0权重一致，不重跑background。每域七分支、两张新地图和两项AUPRO，固定SEGMENT评分/加权定位组合不增加推理或像素作业。汇总含逐域、两域及三域等权指标；background组合标为开发后派生。保留原20项CPU测试，共32项通过（代码仓库无本地background包时相关真实数据回归明确skip）。默认preflight、显式补检索、两域合计12小时预算、无自动构库/安装/关机。本机预检和实验数据不上传。
