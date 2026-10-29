@@ -137,6 +137,27 @@ def verified(a):
     return r
 
 
+def baseline_distances(q,searches):
+    """Legacy Exact endpoints/geometry, not the new method's tiled Top16."""
+    from DINOv3.MADEqual.aebad_s_target_local_segment.geometry import geometry_layer
+    raw_u=[];raw_s=[]
+    for l in LAYERS:
+        search=searches[l];distances,indices=search.baseline_top(q[l])
+        raw_u.append(distances.min(axis=0))
+        seg,_=geometry_layer(distances[1:],indices[1:],distances[0],search.cpu_parts[1:])
+        raw_s.append(seg['K8_SEGMENT'])
+    return {U:np.stack(raw_u),S:np.stack(raw_s)}
+
+
+def check_baselines(rows,sample,raw,old,patch):
+    """Parent's distance tolerances; image scores have their separate check."""
+    for b in (U,S):
+        wanted=old[b]*np.asarray(patch['scales'],np.float32)[:,None]+np.asarray(patch['medians'],np.float32)[:,None]
+        for j,l in enumerate(LAYERS):
+            check(rows,sample['sample_id'],'original_Exact_distance_'+b,raw[b][j],wanted[j],
+                  atol=1e-7,rtol=1e-6,branch=b,domain=sample['domain'],layer=l)
+
+
 def predict(a):
     if (a.run_root/'predictions_frozen.json').exists():verified(a);return dict(status='predictions_reused',query_forward_calls=0)
     searches,sr=rt.references(a);source,_=rt.source_bundle(a);cal=states(a);p=baseline_provider(a) if cal['reuse_baselines'] else None
@@ -144,34 +165,33 @@ def predict(a):
     records=[];samples=ip.catalog(a)['samples'];checks=[]
     import time
     a._unit_started=time.perf_counter()
-    from DINOv3.MADEqual.aebad_s_target_local_segment.geometry import geometry_layer
     for i,s in enumerate(samples,1):
         destination=path(a,s)
         if not (destination/'manifest.json').exists():
             q,m=rt.features(a,s);obs=rt.observations(q,m,searches)
-            zs,audits=responses(obs,cal['components'],cal['baseline_patch']);raw_u=[];raw_s=[]
-            for l in LAYERS:
-                v=obs[l];raw_u.append(v['absolute'][:,0]);search=searches[l]
-                banks=search.cpu_parts[1:]
-                target_ids=v['per_index'][1:]-np.asarray(search.offsets[1:-1],np.int64)[:,None]
-                seg,_=geometry_layer(v['per_distance'][1:],target_ids,v['per_distance'][0],banks)
-                raw_s.append(seg['K8_SEGMENT'])
-            zs[U]=z_values(np.stack(raw_u),cal['baseline_patch']);zs[S]=z_values(np.stack(raw_s),cal['baseline_patch'])
+            zs,audits=responses(obs,cal['components'],cal['baseline_patch']);raw=baseline_distances(q,searches)
+            zs[U]=z_values(raw[U],cal['baseline_patch']);zs[S]=z_values(raw[S],cal['baseline_patch'])
             localchecks=[]
             if p:
                 old,record=p.prediction(s)
                 if m['grid']!=record['metadata']['grid'] or not np.array_equal(m['positions'],old['positions']):raise ValueError('parent baseline physical geometry differs')
-                for b in (U,S):
-                    # Same-bank fresh retrieval is checked before using exact historical maps.
-                    check(localchecks,s['sample_id'],'same_bank_standardized_'+b,zs[b],old[b],branch=b,domain='background')
+                check_baselines(localchecks,s,raw,old,cal['baseline_patch'])
                 if not all(r['verified'] for r in localchecks):
                     st.write_csv(a.run_root/'failed_baseline_reuse.csv',localchecks)
-                    raise ValueError('same-bank baseline reconstruction differs; no metric stitching or tolerance relaxation; use a NEW run with --baseline-mode fresh to reevaluate baselines using the same bank (no Source rebuild required)')
+                    np.savez_compressed(a.run_root/'failed_baseline_distances.npz',
+                        union=raw[U],segment=raw[S],parent_union=old[U],parent_segment=old[S],
+                        medians=np.asarray(cal['baseline_patch']['medians'],np.float32),
+                        scales=np.asarray(cal['baseline_patch']['scales'],np.float32),positions=m['positions'])
+                    raise ValueError('original Exact baseline reconstruction differs; preserved per-layer raw-distance audit in failed_baseline_reuse.csv; inputs and completed calibration retained')
                 # Preserve exact inherited fallback response, including original FP32 roundoff.
                 for j,l in enumerate(LAYERS):
                     fallback=~(obs[l]['valid']&obs[l]['candidate_valid'][:,0])
                     for b in NEW:zs[b][j,fallback]=old[U][j,fallback]
                 zs[U]=np.array(old[U]);zs[S]=np.array(old[S])
+            else:
+                for j,l in enumerate(LAYERS):
+                    fallback=~(obs[l]['valid']&obs[l]['candidate_valid'][:,0])
+                    for b in NEW:zs[b][j,fallback]=zs[U][j,fallback]
             scores={b:response(z,m['positions'],m['grid'],m['output_shape'],cal['image'][b])[1] for b,z in zs.items()}
             if p:
                 for b in (U,S):

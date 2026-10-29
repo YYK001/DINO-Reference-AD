@@ -146,3 +146,20 @@ class Search:
                 nb=t.linalg.vector_norm((x[:,None]-self.m[ids])[:,:,None]+diff,dim=-1)/np.float32(x.shape[1])
                 parts[0].append(nb.mean(-1).cpu().numpy());parts[1].append(rel.mean(-1).cpu().numpy())
         return np.concatenate(parts[0]),np.concatenate(parts[1])
+
+    def baseline_top(self,q):
+        """Original per-bank Exact call, independent of the new Top16 tiling.
+
+        A different FP32 GEMM shape can select a different nearly tied endpoint.
+        SEGMENT must use the legacy endpoint selection as well as its geometry.
+        Reuse resident centers; do not reread/upload banks or run the backbone.
+        """
+        from DINOv3.relation_reliability.superadd_host import _exact_top1_chunked
+        t=self.torch;distances=[];indices=[]
+        with t.inference_mode():
+            query=t.tensor(q,dtype=t.float32,device=self.device)
+            for lo,hi in zip(self.offsets[:-1],self.offsets[1:]):
+                d,i=_exact_top1_chunked(query,self.m[lo:hi])
+                distances.append(d.numpy()/np.float32(query.shape[1]))
+                indices.append(i.numpy())  # local to this bank, as geometry_layer expects
+        return np.stack(distances),np.stack(indices)

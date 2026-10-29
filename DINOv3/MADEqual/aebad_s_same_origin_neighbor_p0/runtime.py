@@ -248,6 +248,8 @@ def prepare_target(a):
 
 def references(a,source_only=False):
     """Four layers resident for all images, avoiding repeated HDD reads/uploads."""
+    from DINOv3.MADEqual.aebad_s_normal_correspondence_adaptation.runtime import reliable_precision
+    reliable_precision(a.device)  # Also when every input feature is reused: no model() call.
     source,sr=source_bundle(a);targets=[]
     if not source_only:
         for row in ip.catalog(a)['supports']['background']:

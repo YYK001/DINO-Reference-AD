@@ -444,4 +444,56 @@ class CalibrationAndExecutionTests(unittest.TestCase):
         self.assertFalse(a['measured_current_run']);self.assertEqual(len(a['stages']),5)
 
 
+class LegacyBaselineTests(unittest.TestCase):
+    def test_legacy_endpoint_calls_keep_complete_banks_and_original_default_chunks(self):
+        import torch
+        from DINOv3.relation_reliability.superadd_host import _exact_top1_chunked
+        rng=np.random.default_rng(19)
+        q=rng.normal(size=(5,1280)).astype(np.float32)
+        banks=[rng.normal(size=(k,1280)).astype(np.float32) for k in (19,7,11)]
+        banks[1][1]=banks[1][0]  # Original min tie chooses first row.
+        q[0]=banks[1][0]
+        centers=np.concatenate(banks);offsets=np.cumsum([0]+[len(x) for x in banks]).tolist()
+        search=n.Search(centers,np.zeros((len(centers),4,1280),np.float32),np.ones(len(centers),bool),offsets,'cpu',1,2)
+        calls=[]
+        def exact(query,keys):
+            calls.append((len(query),len(keys)))
+            return _exact_top1_chunked(query,keys)
+        with patch('DINOv3.relation_reliability.superadd_host._exact_top1_chunked',side_effect=exact):
+            distances,indices=search.baseline_top(q)
+        self.assertEqual(calls,[(5,19),(5,7),(5,11)])
+        for j,bank in enumerate(banks):
+            d,i=_exact_top1_chunked(torch.tensor(q),torch.tensor(bank))
+            np.testing.assert_array_equal(distances[j],d.numpy()/np.float32(1280))
+            np.testing.assert_array_equal(indices[j],i.numpy())
+        self.assertEqual(indices[1,0],0)
+
+    def test_segment_uses_legacy_endpoints_not_top16_minima(self):
+        from DINOv3.MADEqual.aebad_s_target_local_segment.geometry import geometry_layer
+        rng=np.random.default_rng(21);q={};searches={};expected=[]
+        for l in LAYERS:
+            query=rng.normal(size=(2,1280)).astype(np.float32)
+            banks=[rng.normal(size=(k,1280)).astype(np.float32) for k in (4,3,5)]
+            distances=np.stack([np.linalg.norm(query-bank[0],axis=1)/1280 for bank in banks]).astype(np.float32)
+            indices=np.zeros((3,2),np.int64)
+            search=SimpleNamespace(cpu_parts=banks,baseline_top=lambda q,d=distances,i=indices:(d,i))
+            q[l]=query;searches[l]=search
+            expected.append(geometry_layer(distances[1:],indices[1:],distances[0],banks[1:])[0]['K8_SEGMENT'])
+        raw=pp.baseline_distances(q,searches)
+        np.testing.assert_array_equal(raw[pp.S],np.stack(expected))
+
+    def test_raw_distance_and_score_units_are_separate_real_errors_rejected(self):
+        patch_state=dict(medians=[.02]*4,scales=[.004]*4)
+        old={b:np.ones((4,3),np.float32) for b in (pp.U,pp.S)}
+        raw={b:x*np.float32(.004)+np.float32(.02) for b,x in old.items()}
+        rows=[];sample=dict(sample_id='test',domain='background')
+        pp.check_baselines(rows,sample,raw,old,patch_state)
+        self.assertEqual(len(rows),8);self.assertTrue(all(r['verified'] for r in rows))
+        self.assertEqual({r['layer'] for r in rows},set(LAYERS))
+        self.assertTrue(all(r['atol']==1e-7 and r['rtol']==1e-6 for r in rows))
+        raw[pp.S][0,0]+=np.float32(.4783567*.004)
+        rows=[];pp.check_baselines(rows,sample,raw,old,patch_state)
+        self.assertFalse(all(r['verified'] for r in rows))
+
+
 if __name__=='__main__':unittest.main()
