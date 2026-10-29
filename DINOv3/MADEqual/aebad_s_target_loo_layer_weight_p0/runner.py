@@ -84,8 +84,13 @@ def main(argv=None):
         for stage in STAGES:
             log=a.run_root/'logs'/(stage+'.log');log.parent.mkdir(exist_ok=True)
             print(f'STAGE={stage} LOG={log}',flush=True)
-            with log.open('a',encoding='utf-8') as f:r=subprocess.run([sys.executable,'-B','-u','-m',__package__+'.runner',stage,*tokens],stdout=f,stderr=subprocess.STDOUT)
-            if r.returncode:print(json.dumps(pack(a)));return r.returncode
+            with log.open('a',encoding='utf-8') as f:
+                with subprocess.Popen([sys.executable,'-B','-u','-m',__package__+'.runner',stage,*tokens],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1) as child:
+                    for line in child.stdout:
+                        f.write(line);f.flush();print(line,end='',flush=True)
+                    rc=child.wait()
+            print(f'STAGE={stage} EXIT_CODE={rc}',flush=True)
+            if rc:print(json.dumps(pack(a)));return rc
         print(json.dumps(pack(a)));return 0
     if a.stage=='preflight':
         r=execute(a);print(json.dumps(r,ensure_ascii=False,indent=2));return 0 if r['status']=='inputs_available' else 2
