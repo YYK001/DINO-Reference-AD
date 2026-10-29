@@ -895,3 +895,27 @@ DINOv3/tests/test_aebad_s_target_loo_layer_weight_domains.py
 ```
 
 不含validation_results.json、local_asset_notes.json、local_preflight.log或outputs、server_results、数据/权重/缓存。原background大数组与结果不修改、不上传。
+
+
+## Target-LOO两组K8支持复验（2026-10-29）
+
+新增独立入口、固定支持来源索引和CPU回归测试，原数学及历史结果不修改。
+
+```text
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/README.md
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/__init__.py
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/historical_supports.json
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/inputs.py
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/pipeline.py
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/protocol.py
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/reporting.py
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/runner.py
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/runtime.py
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/scripts/run_workstation.sh
+DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/selection.py
+DINOv3/tests/test_aebad_s_target_loo_support_retest.py
+```
+
+不含validation_results.json、cpu_test_results.txt、本地preflight、outputs、server_results、数据、权重或大缓存。historical_supports.json仅含冻结支持身份/顺序及来源元数据，不含图片或特征。

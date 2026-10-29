@@ -186,3 +186,10 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 ## Target-LOO固定跨域验证
 
 [illumination/view扩展、资源估计与单卡手动入口](DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/CROSSDOMAIN.md)。完整域参数贯穿父资产读取，265/364图、每域原seed42 K8；只读导入background Source66统计，检查共同依赖及gamma0权重一致，不重跑background。每域七分支、两张新地图和两项AUPRO，固定SEGMENT评分/加权定位组合不增加推理或像素作业。汇总含逐域、两域及三域等权指标；background组合标为开发后派生。保留原20项CPU测试，共32项通过（代码仓库无本地background包时相关真实数据回归明确skip）。默认preflight、显式补检索、两域合计12小时预算、无自动构库/安装/关机。本机预检和实验数据不上传。
+
+
+## Target-LOO层加权：两组K8支持复验
+
+[协议、资产复用与单卡运行说明](DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/README.md)及[实现审计](DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/implementation_audit.md)。固定三域、support_seed42/43，Source seed42与455/66划分不变；共同名单289/257/356，共902张唯一图像。seed42复用统计、权重和预测，seed43仅显式补缺失完整特征/Exact/原SEGMENT；四图共享同一查询，不训练或搜索。
+
+共同名单上的五指标全部重评，六设置最多24项独立地图/AUPRO；七分支保留两种读出，同seed组合不增加地图。逐设置、每seed三域及两seed等权汇总，保留支持敏感性比较。默认CPU preflight、按阶段续跑、12h预算暂停、单GPU与最多8 CPU；不重建Source、不重复扫描大数组SHA、无自动安装/关机或自定义Triton。56项本地CPU测试通过，包含父查询sample/identity格式的零前向缓存复用修复；真实CUDA和完整复验待用户执行。
