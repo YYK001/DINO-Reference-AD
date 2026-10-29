@@ -176,3 +176,8 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [方法、资源估计和工作站命令](DINOv3/MADEqual/aebad_s_same_origin_neighbor_p0/README.md)及[实现审计](DINOv3/MADEqual/aebad_s_same_origin_neighbor_p0/implementation_audit.md)。原seed42 K8与297图，455/66 Source划分及每层100K；比较UNION、SEGMENT、固定评分/定位组合、绝对邻居C1、相对差分C1及绝对Top16候选内的相对差分联合选择。无训练、参数搜索或扩域。
 
 优先沿原导入来源链恢复选中索引、实际增强及完整物理邻域；中心不吻合明确停止，仅显式选择才独立重建原Source并重评基线。新检索FP32、单GPU、最多8 CPU，原精确CPU/ADEval评价、分阶段续跑、12小时实测预算暂停与小报告打包。特征目录、提取配置和图像/提供者manifest绑定到运行身份，拒绝续跑混用；不添加容量准入、重复大文件SHA扫描、自定义Triton或关机。33项CPU测试通过，真实来源恢复、CUDA性能与完整指标尚待用户执行。
+
+
+## Target-LOO正常统计层加权
+
+[固定公式、资产与工作站入口](DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/README.md)，[实现审计](DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/implementation_audit.md)。background seed42 K8、297张，冻结原UNION检索与Source MAD，比较Source单侧正偏离新加权和Source/Target正常整图留一混合加权（gamma=0/.5）。两种新图像读出、两项新增原ADEval AUPRO，兼容原基线只读复用。默认preflight，无训练或搜索，不自动构库或提取；显式补正常检索、阶段续跑、单GPU、12h预算暂停。19项CPU测试通过，含FP32权重求和舍入修复；真实检索与完整GPU评价尚待运行。本机预检、结果、缓存和权重不上传。

@@ -1,0 +1,15 @@
+LAYERS=(7,15,23,31)
+U='UNION_K8'
+S='SEGMENT_K8'
+COMBINED='SEGMENT_IMAGE_UNION_MAP'
+SOURCE='UNION_SOURCE_WEIGHT'
+TARGET='UNION_TARGET_LOO_WEIGHT'
+NEW=(SOURCE,TARGET)
+READOUTS=('PEAK_LOCAL_WEIGHT','WEIGHTED_MAP_MAX')
+STAGES=('prepare-normal-stats','fit-weights','predict','evaluate','aupro','summarize')
+CONFIG=dict(version='target_loo_positive_tail_v1',domain='background',seed=42,layers=list(LAYERS),
+    gammas=[0.,.5],quantile=.99,quantile_method='linear',scale_floor=1e-8,statistics=['u','p','q'],
+    Source_calibration=66,Target_supports=8,evaluation_images=297,normal_images=85,anomaly_images=212,
+    distance='original_Exact_Euclidean/1280_once',patch_MAD='frozen_Source',
+    Target_reference='Source_plus_K7_exclude_entire_heldout_image',nstrips=200,FPR_max=.3,
+    training=False,parameter_search=False,duration_budget_hours=12)

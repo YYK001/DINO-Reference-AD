@@ -844,3 +844,25 @@ DINOv3/tests/test_aebad_s_blind_context.py
 ## 2026-10-29 同源邻域差分检索
 
 新增独立模块 `DINOv3/MADEqual/aebad_s_same_origin_neighbor_p0/` 的12份Python源文件、README、实现审计和工作站脚本，以及 `DINOv3/tests/test_aebad_s_same_origin_neighbor.py`。包含特征提取配置/提供者manifest续跑绑定修复。上传代码、测试和说明；不上传delivery_manifest、本机validation/local_preflight、资产、权重或实验结果。测试使用已在仓库中的frozen_origins元数据，不依赖本机server_results。
+
+
+## Target-LOO正常统计层加权（2026-10-29）
+
+新增代码/测试/说明：
+
+```text
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/__init__.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/inputs.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/numerics.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/pipeline.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/protocol.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/reporting.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/runner.py
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/README.md
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_target_loo_layer_weight_p0/scripts/run_workstation.sh
+DINOv3/tests/test_aebad_s_target_loo_layer_weight.py
+```
+
+不含validation_results、local_asset_notes、local_preflight、数据、权重、预测或服务器结果；固定协议由protocol.py提供。
