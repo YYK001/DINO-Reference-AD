@@ -919,3 +919,27 @@ DINOv3/tests/test_aebad_s_target_loo_support_retest.py
 ```
 
 不含validation_results.json、cpu_test_results.txt、本地preflight、outputs、server_results、数据、权重或大缓存。historical_supports.json仅含冻结支持身份/顺序及来源元数据，不含图片或特征。
+
+
+## Target-LOO权重交叉与可分性审计（2026-10-30）
+
+仅新增独立工具、说明和CPU测试，父实验结果及已有数学不改。
+
+```text
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/__init__.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/analysis.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/evaluation.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/implementation_audit.md
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/inputs.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/numerics.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/prediction.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/protocol.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/README.md
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/reporting.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/runner.py
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/scripts/run_workstation.sh
+DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/smoke.py
+DINOv3/tests/test_aebad_s_loo_weight_separability_audit.py
+```
+
+不含validation_results.json、cpu_test_results.txt、preflight、outputs、server_results、数据、权重、响应数组、完整地图或图像对结果。公开代码支持六个诊断交叉及最小标量响应导出；实际新实验尚未执行。

@@ -193,3 +193,10 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [协议、资产复用与单卡运行说明](DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/README.md)及[实现审计](DINOv3/MADEqual/aebad_s_target_loo_support_retest_p0/implementation_audit.md)。固定三域、support_seed42/43，Source seed42与455/66划分不变；共同名单289/257/356，共902张唯一图像。seed42复用统计、权重和预测，seed43仅显式补缺失完整特征/Exact/原SEGMENT；四图共享同一查询，不训练或搜索。
 
 共同名单上的五指标全部重评，六设置最多24项独立地图/AUPRO；七分支保留两种读出，同seed组合不增加地图。逐设置、每seed三域及两seed等权汇总，保留支持敏感性比较。默认CPU preflight、按阶段续跑、12h预算暂停、单GPU与最多8 CPU；不重建Source、不重复扫描大数组SHA、无自动安装/关机或自定义Triton。56项本地CPU测试通过，包含父查询sample/identity格式的零前向缓存复用修复；真实CUDA和完整复验待用户执行。
+
+
+## Target-LOO权重交叉与可分性审计
+
+[离线输入、缓存导出及运行说明](DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/implementation_audit.md)。冻结三域902张及两套K8 memory，用WS/W42/W43构造2×3诊断矩阵；只新增六个交叉地图和六项原ADEval AUPRO，原12格指标只读复用。交叉引入另一K8统计，明确标记16张Target正常信息，不作为同信息K8方法成绩。
+
+复用原FP32加权、插值、精确CPU评价与空间实例/环带规则，全部无GT响应冻结后才开展图像对精确并列、p/q间隔贡献、固定WS位置margin和正常Top1%审计。保留峰值移动、NA及连续面积，不拟合新权重、训练、提特征、做Exact或搜索参数。默认CPU preflight；仅需四层标量UNION与positions，不要求模型/Source bank实体；提供最小只读导出、smoke、按阶段续跑和12h预算暂停。72项本地CPU测试通过（新增16、回归56），真实交叉缓存重放及GPU AUPRO尚待执行。无自动安装、容量准入、自定义Triton或关机。
