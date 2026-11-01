@@ -943,3 +943,29 @@ DINOv3/tests/test_aebad_s_loo_weight_separability_audit.py
 ```
 
 不含validation_results.json、cpu_test_results.txt、preflight、outputs、server_results、数据、权重、响应数组、完整地图或图像对结果。公开代码支持六个诊断交叉及最小标量响应导出；实际新实验尚未执行。
+
+
+## 固定单侧Source–Target联合正常响应（2026-11-01）
+
+新增独立工具、CPU测试与运行说明；不修改历史实验代码、结果或报告。
+
+```text
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/__init__.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/budget.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/inputs.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/numerics.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/prediction.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/protocol.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/reporting.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/runner.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/runtime.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/smoke.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/verify_stock_cpu.py
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/README.md
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_joint_reference_response_p0/scripts/run_workstation.sh
+DINOv3/tests/test_aebad_s_joint_reference_response.py
+```
+
+不含validation_results.json、torch_cpu_validation.json、测试日志、本地preflight、outputs、server_results、数据、权重、正常参照数组、分路距离、预测地图或scratch。verify_stock_cpu.py是可重复的CPU张量核验入口，默认不会执行。真实GPU与全域实验未运行。

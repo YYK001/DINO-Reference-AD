@@ -200,3 +200,10 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [离线输入、缓存导出及运行说明](DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/README.md)与[实现审计](DINOv3/MADEqual/aebad_s_loo_weight_separability_audit/implementation_audit.md)。冻结三域902张及两套K8 memory，用WS/W42/W43构造2×3诊断矩阵；只新增六个交叉地图和六项原ADEval AUPRO，原12格指标只读复用。交叉引入另一K8统计，明确标记16张Target正常信息，不作为同信息K8方法成绩。
 
 复用原FP32加权、插值、精确CPU评价与空间实例/环带规则，全部无GT响应冻结后才开展图像对精确并列、p/q间隔贡献、固定WS位置margin和正常Top1%审计。保留峰值移动、NA及连续面积，不拟合新权重、训练、提特征、做Exact或搜索参数。默认CPU preflight；仅需四层标量UNION与positions，不要求模型/Source bank实体；提供最小只读导出、smoke、按阶段续跑和12h预算暂停。72项本地CPU测试通过（新增16、回归56），真实交叉缓存重放及GPU AUPRO尚待执行。无自动安装、容量准入、自定义Triton或关机。
+
+
+## Source–Target联合正常响应：单侧联合尾部建模
+
+[固定协议、缓存盘点和工作站分阶段入口](DINOv3/MADEqual/aebad_s_joint_reference_response_p0/README.md)与[实现审计及检查清单](DINOv3/MADEqual/aebad_s_joint_reference_response_p0/implementation_audit.md)。固定902张共同评价、support_seed42/43各自独立K8、原Source与MAD；三个单侧尾部模型及CF7容量对照，共24项新定位/AUPRO。正常整图K7排除、同位置四层两路响应、固定512点及h=1；概率先按正常图等权平均再负log。
+
+复用原Exact FP32、插值、精确全像素CPU及ADEval1.1.0评价。优先复用seed43分路距离和跨seed共享Source，缺项只显式补算；不构库、不提取Source66、不训练或搜索。双重分块并批量处理八正常参照，GPU使用现成PyTorch算子，无自定义Triton。表A继承同组SEGMENT CH1，表B统一新图MAP_MAX；像素任务不随读出重复。默认无Torch preflight，单GPU、最多8 CPU、逐图续跑、真实正常资产smoke及12h预算边界，无容量准入、自动安装或关机。96项本地CPU测试及3组独立PyTorch CPU核对通过；真实CUDA、完整补算和正式新指标尚未执行。本地盘点、数据、权重、缓存和结果不上传。
