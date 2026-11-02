@@ -994,3 +994,23 @@ DINOv3/tests/test_aebad_s_shared_residual_translation.py
 ```
 
 不含validation_results.json、torch_cpu_validation.json、CPU测试日志、本地preflight、downloads、outputs、server_results、数据、权重、完整特征、memory、NN数组、预测或scratch。原始资产只读复用；新v2派生预测及smoke绑定计算后端和直接范数参照协议，旧目录拒绝静默迁移。直接范数UNION及A/B共享均值使用同一赢家，原MM保留历史对照；新增三域参照CPU/AUPRO各3项，总计各12项。强组合直接引用新参照地图，额外作业0。零修正地图/CH1保持原1e-5；数值路径及新旧指标变化独立报告。139项CPU回归及独立现成Torch CPU核验通过，真实GPU未验证范围见模块审计。
+
+
+## SEGMENT整体响应条件校正（2026-11-02）
+
+```text
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/inputs.py
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/numerics.py
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/pipeline.py
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/protocol.py
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/reporting.py
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/runner.py
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/runtime.py
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/__init__.py
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/scripts/run_workstation.sh
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/README.md
+DINOv3/MADEqual/aebad_s_conditional_image_score_p0/implementation_audit.md
+DINOv3/tests/test_aebad_s_conditional_image_score.py
+```
+
+仅固定实验实现、测试及运行说明，含报告六设置计数P2修复。排除file_manifest.json、validation_results.json、测试日志、预检和本地结果、数据、权重、Source/Target特征及所有缓存。35项模块CPU测试通过；未进行真实GPU或正式实验。

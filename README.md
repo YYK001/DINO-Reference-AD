@@ -216,3 +216,10 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 候选自身CH1、固定SEGMENT CH1、WEIGHTED_MAP_MAX分表；原SEGMENT CH1＋新直接范数Source图为强参照，组合无额外地图/AUPRO。三域12项精确CPU＋12项ADEval（候选9＋参照3）；零修正地图/CH1对新参照仍要求1e-5，同路径CPU/Torch仍atol1e-7、rtol1e-6。新旧参照指标、地图/评分差与来源切换独立输出，数值路径变化不计作方法收益。
 
 原特征、memory及可靠NN按自身依赖复用；新v2使用新run/cache，拒绝旧协议/异后端混用。真实整图smoke与12h边界，单GPU、最多8 CPU，无Source重建、重新校准、训练、容量准入、自动安装或关机。139项CPU回归及独立现成Torch CPU核验通过；真实v2 CUDA、完整测速与正式效果待用户执行。本机资产、日志和结果不上传。
+
+
+## 正常统计驱动的SEGMENT图像条件校正
+
+[固定公式、资产与手动运行入口](DINOv3/MADEqual/aebad_s_conditional_image_score_p0/README.md)及[实现审计/检查清单](DINOv3/MADEqual/aebad_s_conditional_image_score_p0/implementation_audit.md)。固定三域共同902图、两组K8，共1804个图像×支持组实例；Source66在当前K8下与支持整图K7留一各自生成原SEGMENT的B/P，Source非负斜率与固定正则Target混合斜率只拟合正常输入。三分支仅改变图像评分，定位三指标继承原同组Source加权地图，不新增像素/AUPRO或恢复共享残差候选。
+
+复用原Exact、SEGMENT、CH1及特征身份接口，缺项仅显式补算，Source不重建；默认无Torch预检、逐图小表续跑、单GPU/最多8 CPU、真实资产smoke及12h边界，无容量准入、自动安装或关机。35项模块CPU测试及相关依赖回归通过，包含AUROC/AP六设置报告计数修复；真实缓存/CUDA/效果尚未验证。数据、缓存、测试日志与预检结果不上传。
