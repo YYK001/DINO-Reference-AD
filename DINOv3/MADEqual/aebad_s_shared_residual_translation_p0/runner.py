@@ -17,7 +17,7 @@ def parser():
     p.add_argument('stage',nargs='?',default='preflight',choices=('preflight','smoke','predict','evaluate','aupro','summarize','pack','all'))
     p.add_argument('--parent-run',type=Path,default=ip.ROOT/'server_results/aebad_target_loo_two_K8_20261030_013433')
     p.add_argument('--sacp-run',type=Path,default=ip.ROOT/'server_results/aebad_s_sacp_seed42_20261028_011454')
-    p.add_argument('--run-root',type=Path,default=ip.ROOT/'DINOv3/outputs/mad_equal/aebad_shared_residual_translation_v1')
+    p.add_argument('--run-root',type=Path,default=ip.ROOT/'DINOv3/outputs/mad_equal/aebad_shared_residual_direct_reference_v2')
     p.add_argument('--cache-root',type=Path)
     p.add_argument('--evaluation-scratch',type=Path)
     for name in ('raw-cache','memory42-root','source-bank','support-feature-root','feature-manifest','nn-provider','checkpoint'):

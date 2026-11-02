@@ -250,7 +250,7 @@ def preflight(a):
             cached_case='full query vectors + identical bank/supports + reliable indices: no model/Exact',
             missing_case='maximum 902 query forwards + 32472 Exact calls; support forwards separately counted if needed',
             RAM_GiB_planning_range=[6,18],VRAM_GiB_planning_range=[6,20],
-            new_compact_cache_GiB_planning_range=[5,8],CPU_scratch_GiB_planning_range=[3,12],
+            new_compact_cache_GiB_planning_range=[8,11],CPU_scratch_GiB_planning_range=[3,12],
             optional_persisted_full_query_features='about 239.6 GiB for 902 x 13924 x 1280 x 4 x FP32; disabled by default',
             resource_ranges_are_unverified_not_admission_checks=True,over_12h_requires_explicit_consent=True))
     return result

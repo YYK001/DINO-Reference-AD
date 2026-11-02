@@ -15,7 +15,7 @@ def failure(a,d,row,checks):
     raise ValueError('baseline compatibility failed ('+failed+'); see failed_baseline_checks.csv; no relaxation or baseline stitching')
 
 
-def baseline_checks(a,d,row,raw,positions,grid,shape,zero_raw=None):
+def baseline_checks(a,d,row,raw,positions,grid,shape,zero_raw=None,reference_raw=None):
     p=ip.parent(a);x,meta,ref=ip.baseline(a,d,row);checks=[];oldorder=nm.order(x['positions'],grid)
     actual=z_values(raw,p.inputs['mad']['patch']);expected=x[U][:,oldorder]
     if not np.isfinite(actual).all() or actual.shape!=expected.shape:raise ValueError('baseline z layout differs')
@@ -31,16 +31,24 @@ def baseline_checks(a,d,row,raw,positions,grid,shape,zero_raw=None):
     # nearby but numerically different historical maps as interchangeable.
     im,sc=nm.score(raw,positions,grid,shape,p.inputs['mad']['patch'],p.inputs['mad']['image'],p.weights[d])
     err=abs(sc['CH1']-old['scores'][U]['CH1']);maperr=float(np.abs(im-nm.weighted(x[U],x['positions'],grid,shape,p.weights[d])[0]).max())
-    checks.append(dict(check='zero_translation_chain',max_abs_error=max(err,maperr),atol=1e-5,verified=max(err,maperr)<=1e-5))
-    # This is the genuine zero-translation check: use the candidate's DIRECT
-    # residual norm, not the original MM distances passed as raw above. Preserve
-    # the existing score/map tolerance; incompatible reuse still stops here.
+    checks.append(dict(check='historical_Exact_scoring_chain',reference=SOURCE,max_abs_error=max(err,maperr),atol=1e-5,verified=max(err,maperr)<=1e-5))
+    # Historical MM products remain strictly checked in their own path above.
+    # Zero translation is compared ONLY to the authorized matched direct norm
+    # reference; MM-vs-direct differences remain recorded, not stitched.
     if zero_raw is not None:
-        reference,_=nm.weighted(x[U],x['positions'],grid,shape,p.weights[d])
+        if reference_raw is None:raise ValueError('matched direct reference required for zero checks')
+        reference,reference_scores=nm.score(reference_raw,positions,grid,shape,p.inputs['mad']['patch'],p.inputs['mad']['image'],p.weights[d])
+        old_map,_=nm.weighted(x[U],x['positions'],grid,shape,p.weights[d])
+        drift=dict(domain=d,sample_id=row['sample_id'],historical_reference=SOURCE,direct_reference=REFERENCE,
+            CH1_signed_change=reference_scores['CH1']-old['scores'][U]['CH1'],
+            map_max_abs_difference=float(np.abs(reference-old_map).max()),
+            map_mean_signed_change=float((reference-old_map).mean(dtype=np.float32)),
+            historical_compatibility_required=False,new_reference_evaluated_separately=True)
+        st.write_json(a.run_root/d/'reference_path_differences'/(row['sample_id']+'.json'),drift)
         for name,value in zero_raw.items():
             zi,zs=nm.score(value,positions,grid,shape,p.inputs['mad']['patch'],p.inputs['mad']['image'],p.weights[d])
-            se=abs(zs['CH1']-old['scores'][U]['CH1']);me=float(np.abs(zi-reference).max())
-            checks.append(dict(check='zero_direct_vector_score_map',variant=name,max_abs_error=max(se,me),
+            se=abs(zs['CH1']-reference_scores['CH1']);me=float(np.abs(zi-reference).max())
+            checks.append(dict(check='zero_direct_vector_score_map',reference=REFERENCE,variant=name,max_abs_error=max(se,me),
                                CH1_abs_error=se,map_max_abs_error=me,atol=1e-5,verified=max(se,me)<=1e-5))
     if not all(r['verified'] for r in checks):failure(a,d,row,checks)
     return checks,ref
@@ -89,9 +97,12 @@ def one(a,d,row,refs):
         # torch.cdist(use_mm) and norm(q-m) have different FP32 cancellation.
         # Compare like-for-like in smoke; record cross-path drift descriptively.
         # Actual zero-correction CH1/map compatibility is checked below unchanged.
-        exact_union=distances.min(0);delta=np.abs(small['zero_fixed']-exact_union)
-        arithmetic.append(dict(domain=d,sample_id=row['sample_id'],layer=l,comparison='direct_residual_vs_original_cdist_MM',
+        exact_union=distances.min(0);delta=np.abs(values[REFERENCE]-exact_union)
+        old_win=small['legacy_union_source'];same_anchor=small['direct_distance'][old_win,np.arange(n)]
+        arithmetic.append(dict(domain=d,sample_id=row['sample_id'],layer=l,comparison='new_direct_UNION_vs_original_cdist_MM_UNION',
             max_abs_error=float(delta.max()),mean_abs_error=float(delta.mean(dtype=np.float32)),
+            same_anchor_max_abs_error=float(np.abs(same_anchor-exact_union).max()),
+            source_switch_count=int(np.sum(small['union_source']!=old_win)),source_switch_fraction=float(np.mean(small['union_source']!=old_win)),positions=n,
             positions_over_original_raw_tolerance=int(np.sum(delta>1e-7+1e-6*np.abs(exact_union))),
             diagnostic_only=True,atol_reference=1e-7,rtol_reference=1e-6))
         for name in zeros:zeros[name].append(small[name])
@@ -102,7 +113,7 @@ def one(a,d,row,refs):
     translation_done=time.perf_counter()
     st.write_csv(a.run_root/d/'arithmetic_audit'/(row['sample_id']+'.csv'),arithmetic)
     checks,baseline=baseline_checks(a,d,row,np.stack(original),physical,geometry['grid'],shape,
-                                   zero_raw={name:np.stack(value) for name,value in zeros.items()})
+                                   zero_raw={name:np.stack(value) for name,value in zeros.items()},reference_raw=np.stack(raw[REFERENCE]))
     scores={};hashes={}
     for b in MAPS:
         compact[b]=np.stack(raw[b]);im,sc=nm.score(compact[b],physical,geometry['grid'],shape,p.inputs['mad']['patch'],p.inputs['mad']['image'],p.weights[d])
@@ -122,7 +133,7 @@ def one(a,d,row,refs):
     st.sealed_json(ip.record_path(a,d,row),dict(**ip.signature(a,d),image=ip.image(row),sample_id=row['sample_id'],contract=dep,
         cache_seal=saved['seal'],nearest_seal=nnrec['seal'],baseline=baseline,scores=scores,map_hashes=hashes,checks=checks,
         arithmetic_audit=arithmetic,diagnostics=diagnostics,GT_used=False))
-    print(f'[shared residual] {d}/{row["sample_id"]} three_maps seconds={time.perf_counter()-tick:.3f}',flush=True)
+    print(f'[shared residual] {d}/{row["sample_id"]} three_candidates_one_direct_reference seconds={time.perf_counter()-tick:.3f}',flush=True)
     return True
 
 

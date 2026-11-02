@@ -993,4 +993,4 @@ DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/scripts/run_workstation.s
 DINOv3/tests/test_aebad_s_shared_residual_translation.py
 ```
 
-不含validation_results.json、torch_cpu_validation.json、CPU测试日志、本地preflight、downloads、outputs、server_results、数据、权重、完整特征、memory、NN数组、预测或scratch。原始数组和可靠NN按真实依赖复用；派生预测及smoke绑定计算后端，旧未绑定运行拒绝静默迁移。131项CPU测试通过；三个候选计算不变，异路径误差描述性记录，真实零修正地图/CH1兼容性保持原1e-5。修复后真实GPU复核和全域效果尚待执行。
+不含validation_results.json、torch_cpu_validation.json、CPU测试日志、本地preflight、downloads、outputs、server_results、数据、权重、完整特征、memory、NN数组、预测或scratch。原始资产只读复用；新v2派生预测及smoke绑定计算后端和直接范数参照协议，旧目录拒绝静默迁移。直接范数UNION及A/B共享均值使用同一赢家，原MM保留历史对照；新增三域参照CPU/AUPRO各3项，总计各12项。强组合直接引用新参照地图，额外作业0。零修正地图/CH1保持原1e-5；数值路径及新旧指标变化独立报告。139项CPU回归及独立现成Torch CPU核验通过，真实GPU未验证范围见模块审计。

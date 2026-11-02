@@ -5,7 +5,7 @@ repo=${PROJECT_ROOT:-$work/DINO-Reference-AD}
 PY=${PYTHON:-$work/conda_envs/yyk/bin/python}
 stage=${1:-preflight}
 if [ "$#" -gt 0 ]; then shift; fi
-tag=${RUN_TAG:-aebad_shared_residual_translation_v1}
+tag=${RUN_TAG:-aebad_shared_residual_direct_reference_v2}
 run=${RUN_ROOT:-$work/runs/$tag}
 cache=${CACHE_ROOT:-$work/storage/shared_residual_cache/$tag}
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1

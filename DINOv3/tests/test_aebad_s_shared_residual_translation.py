@@ -31,14 +31,14 @@ def problem(seed=0,k=9,n=17,dim=12):
 
 def direct64(q,banks,ids,dist):
     r=np.stack([q.astype(float)-b[ii].astype(float) for b,ii in zip(banks,ids)])
-    win=dist.argmin(0);u=r[win,np.arange(len(q))];du=u.mean(0);ds=r.mean(1)
-    return {cfg.A:np.linalg.norm(u-du,axis=1)/1280,cfg.B:np.linalg.norm(r-du,axis=2).min(0)/1280,
+    win=np.linalg.norm(r,axis=2).argmin(0);u=r[win,np.arange(len(q))];du=u.mean(0);ds=r.mean(1)
+    return {cfg.REFERENCE:np.linalg.norm(r,axis=2).min(0)/1280,cfg.A:np.linalg.norm(u-du,axis=1)/1280,cfg.B:np.linalg.norm(r-du,axis=2).min(0)/1280,
             cfg.C:np.linalg.norm(r-ds[:,None],axis=2).min(0)/1280}
 
 
 class FormulaTests(unittest.TestCase):
     def test_fixed_scope(self):
-        p=cfg.job_plan();self.assertEqual((p['images'],p['localization_jobs'],p['AUPRO_jobs']),(902,9,9))
+        p=cfg.job_plan();self.assertEqual((p['images'],p['localization_jobs'],p['AUPRO_jobs']),(902,12,12))
         self.assertEqual(cfg.CONFIG['primary'],cfg.C);self.assertEqual(cfg.CONFIG['support_seed'],42)
 
     def test_zero_correction_recovers_union(self):
@@ -50,6 +50,39 @@ class FormulaTests(unittest.TestCase):
         zero,_,_=nm.translate(q,b,i,d,delta_override=(np.zeros(q.shape[1]),np.zeros((9,q.shape[1]))))
         np.testing.assert_array_equal(small['zero_fixed'],zero[cfg.A])
         for key in (cfg.B,cfg.C):np.testing.assert_array_equal(small['zero_reselect'],zero[key])
+
+    def test_direct_winner_replaces_old_MM_for_A_and_shared_mean(self):
+        q=np.array([[0.],[10.],[20.]],np.float32)
+        banks=[np.array([[0.]],np.float32),np.array([[1.]],np.float32)]
+        ids=np.zeros((2,3),np.int64);old=np.array([[0.,0.,0.],[1.,1.,1.]],np.float32)
+        result,small,diag=nm.translate(q,banks,ids,old)
+        np.testing.assert_array_equal(small['union_source'],[0,1,1])
+        np.testing.assert_array_equal(small['legacy_union_source'],[0,0,0])
+        np.testing.assert_allclose(small['delta_U'],[28/3],atol=1e-6)
+        np.testing.assert_allclose(result[cfg.REFERENCE],np.array([0.,9.,19.])/1280,atol=1e-7)
+        np.testing.assert_allclose(result[cfg.A],np.abs(np.array([0.,9.,19.])-28/3)/1280,atol=1e-7)
+        self.assertEqual(diag['legacy_source_switch_count'],2)
+        zero,_,_=nm.translate(q,banks,ids,old,delta_override=(np.zeros(1),np.zeros((2,1))))
+        for value in zero.values():np.testing.assert_array_equal(value,result[cfg.REFERENCE])
+
+    def test_direct_tie_prefers_source_then_support_order(self):
+        q=np.zeros((3,1),np.float32);banks=[np.array([[-1.]],np.float32),np.array([[1.]],np.float32)]
+        result,saved,diag=nm.translate(q,banks,np.zeros((2,3),np.int64),np.array([[2.]*3,[1.]*3],np.float32))
+        np.testing.assert_array_equal(saved['union_source'],[0,0,0]);np.testing.assert_array_equal(saved['delta_U'],[1.])
+        self.assertEqual(diag['legacy_source_switch_count'],3)
+
+    def test_winner_comparison_precedes_final_division(self):
+        bits=np.array([1.5],np.float32).view(np.uint32)[0]
+        values=np.arange(bits,bits+1000,dtype=np.uint32).view(np.float32)
+        scaled=values/np.float32(1280);j=int(np.flatnonzero(scaled[:-1]==scaled[1:])[0])
+        q=np.zeros((1,1),np.float32);banks=[np.array([[values[j+1]]],np.float32),np.array([[values[j]]],np.float32)]
+        _,small,_=nm.translate(q,banks,np.zeros((2,1),np.int64),np.zeros((2,1),np.float32))
+        self.assertEqual(int(small['union_source'][0]),1)
+
+    def test_validator_cannot_override_to_a_distant_source(self):
+        q=np.zeros((3,1),np.float32);banks=[np.array([[1.]],np.float32),np.array([[10.]],np.float32)]
+        with self.assertRaisesRegex(ValueError,'not a direct-norm minimum'):
+            nm.translate(q,banks,np.zeros((2,3),np.int64),np.zeros((2,3),np.float32),union_source_override=np.ones(3,np.int8))
 
     def test_against_small_fp64_reference(self):
         for seed in range(5):
@@ -215,8 +248,8 @@ class PipelineTests(unittest.TestCase):
     def test_GT_refused_before_all_domains_frozen(self):
         with self.assertRaises(FileNotFoundError):ev.evaluate(self.a)
 
-    def test_CPU_nine_jobs_three_scores_share_pixels_and_resume(self):
-        pred.predict(self.a);r=ev.evaluate(self.a);self.assertEqual(r['jobs'],9)
+    def test_CPU_twelve_jobs_three_scores_share_pixels_and_resume(self):
+        pred.predict(self.a);r=ev.evaluate(self.a);self.assertEqual(r['jobs'],12)
         for d in cfg.DOMAINS:
             for b in cfg.MAPS:
                 r=ip.rows(ev.destination(self.a,d,b)/'metrics.csv');self.assertEqual(len(r),3)
@@ -224,7 +257,7 @@ class PipelineTests(unittest.TestCase):
                 inherited=next(x for x in r if x['scoring']=='SEGMENT_CH1')
                 self.assertEqual(inherited['image_metrics_inherited'],'True')
         with patch.object(ev,'GTData',side_effect=AssertionError('completed pixels must resume')):
-            self.assertEqual(ev.evaluate(self.a)['jobs'],9)
+            self.assertEqual(ev.evaluate(self.a)['jobs'],12)
 
     def test_intermediate_metric_modification_rejected(self):
         pred.predict(self.a);ev.evaluate(self.a);out=ev.destination(self.a,cfg.DOMAINS[0],cfg.A)
@@ -238,11 +271,11 @@ class PipelineTests(unittest.TestCase):
 
     def test_pending_is_not_zero_or_completion(self):
         pred.predict(self.a);ev.evaluate(self.a);r=report.summarize(self.a)
-        self.assertEqual(r['status'],'pending');self.assertEqual(len(r['pending']),9)
+        self.assertEqual(r['status'],'pending');self.assertEqual(len(r['pending']),12)
         ms=ip.rows(self.a.run_root/'metrics.csv');new=[v for v in ms if v['branch'] in cfg.MAPS]
         self.assertTrue(all(v['AUPRO']=='' for v in new))
 
-    def test_nine_AUPRO_commits_finish_and_do_not_touch_GPU_on_resume(self):
+    def test_twelve_AUPRO_commits_finish_and_do_not_touch_GPU_on_resume(self):
         pred.predict(self.a);ev.evaluate(self.a)
         # Synthetic sealed result fixtures exercise orchestration only, never
         # claim an actual ADEval computation or a scientific result.
@@ -252,15 +285,55 @@ class PipelineTests(unittest.TestCase):
                 r=dict(expected,AUPRO=.55,verified_images=2,backend='original_ADEval_1.1.0_CUDA',seconds=1.,peak_cuda_allocated_bytes=0,peak_cuda_reserved_bytes=0)
                 r['seal']=st.digest(r);st.write_json(self.a.run_root/d/'aupro'/(b+'.json'),r)
         with patch.object(ev,'GTData',side_effect=AssertionError('no second GT load')):
-            self.assertEqual(ev.aupro(self.a)['jobs'],9)
+            self.assertEqual(ev.aupro(self.a)['jobs'],12)
         r=report.summarize(self.a);self.assertEqual(r['status'],'all_five_metrics_complete');self.assertEqual(r['pending'],[])
-        self.assertEqual(r['new_AUPRO_complete'],9)
+        self.assertEqual(r['new_AUPRO_complete'],12)
         rows=ip.rows(self.a.run_root/'metrics.csv')
-        self.assertEqual(len([r for r in rows if r['domain']=='macro_3domains' and r['branch'] in cfg.MAPS]),9)
+        self.assertEqual(len([r for r in rows if r['domain']=='macro_3domains' and r['branch'] in cfg.MAPS]),12)
+        self.assertEqual(r['candidate_AUPRO_complete'],9);self.assertEqual(r['reference_AUPRO_complete'],3)
+        self.assertEqual(len(list(self.a.run_root.glob('*/aupro/*.json'))),12)
+        self.assertNotIn(cfg.STRONG,cfg.MAPS)
+        index={(x['domain'],x['branch'],x['scoring']):x for x in rows}
+        for d in (*cfg.DOMAINS,'macro_3domains'):
+            first=index[d,cfg.STRONG,'CH1'];second=index[d,cfg.REFERENCE,'SEGMENT_CH1']
+            for k in cfg.METRICS:self.assertEqual(float(first[k]),float(second[k]))
+        changes=ip.rows(self.a.run_root/'metric_comparisons.csv')
+        primary=[x for x in changes if x['comparison_role']=='primary_matched_reference']
+        self.assertEqual({x['reference'] for x in primary},{cfg.REFERENCE,cfg.STRONG})
+        path_changes=ip.rows(self.a.run_root/'numerical_path_metric_changes.csv')
+        self.assertEqual(len(path_changes),3*5*4)
+        self.assertTrue(all(x['comparison_role']=='numerical_path_change' for x in path_changes))
+        self.assertTrue(all(x['numeric_path']=='legacy_MM' for x in report.historical(self.a)))
+        self.assertTrue(all(x['numeric_path']=='legacy_MM' for x in rows if x['domain']=='macro_3domains' and x['branch']==cfg.U))
+        switches=ip.rows(self.a.run_root/'source_selection_switches.csv')
+        self.assertEqual(len(switches),6*4)
+        self.assertEqual({r['domain'] for r in switches},set(cfg.DOMAINS))
         # A stale large first-run estimate must not charge already committed work.
         st.write_json(self.a.run_root/'time_estimate.json',dict(status='full_image_smoke_estimate',identity='tiny_fixture',
             prediction_backend=ip.prediction_backend(self.a),samples=[dict(domain=d,seconds=100000.) for d in cfg.DOMAINS],stages=dict(CPU_exact=100000.,AUPRO=100000.)))
         smoke.launch_check(self.a)
+
+    def test_CPU_metric_benchmark_keeps_backend_serializable(self):
+        pred.predict(self.a);self.a.benchmark_metrics=True
+        expected_backend=ip.prediction_backend(self.a)
+        r=smoke.run(self.a)
+        self.assertEqual(r['prediction_backend'],expected_backend)
+        self.assertEqual(r['job_plan']['localization_jobs'],12)
+        self.assertEqual(st.read_json(self.a.run_root/'time_estimate.json')['prediction_backend'],expected_backend)
+        self.assertIsNotNone(r['stages']['CPU_exact'])
+        self.assertIsNone(r['stages']['AUPRO'])
+
+    def test_pending_reference_AUPRO_jobs_are_in_whole_run_budget(self):
+        # Cost-only fixtures: candidate jobs exist, three REFERENCE jobs pending.
+        for d in cfg.DOMAINS:
+            for b in cfg.CANDIDATES:st.write_json(self.a.run_root/d/'aupro'/(b+'.json'),dict(cost_fixture=True))
+        st.write_json(self.a.run_root/'time_estimate.json',dict(status='full_image_smoke_estimate',identity='tiny_fixture',
+            prediction_backend=ip.prediction_backend(self.a),samples=[dict(domain=d,seconds=0.) for d in cfg.DOMAINS],
+            stages=dict(CPU_exact=0.,AUPRO=200000.)))
+        self.a.stage='all'
+        with patch.object(ev,'completed',return_value={'completed':True}) as completed:
+            with self.assertRaisesRegex(RuntimeError,'exceeds12h'):smoke.launch_check(self.a)
+        self.assertEqual(completed.call_count,12)
 
     def test_parent_mismatch_preserves_error_and_stops(self):
         d=cfg.DOMAINS[0];row=self.f.rows[d][0];self.f.old[d,row['sample_id']][cfg.U][0,0]+=1.
@@ -293,16 +366,34 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(checks),2);self.assertTrue(all(r['verified'] for r in checks))
         self.assertTrue(all(r['atol']==1e-5 for r in checks))
 
-    def test_actual_zero_map_incompatibility_still_stops_at_original_tolerance(self):
+    def test_large_legacy_drift_is_reported_not_used_as_matched_reference(self):
         d,row=self.apply_MM_offset_fixture(3e-5)
-        with self.assertRaisesRegex(ValueError,'zero_direct_vector_score_map'):
-            pred.one(self.a,d,row,rt.References(self.a,d))
+        self.assertTrue(pred.one(self.a,d,row,rt.References(self.a,d)))
+        rec,_,_=pred.verify(self.a,d,row)
+        self.assertTrue(all(x['verified'] for x in rec['checks']))
+        drift=st.read_json(self.a.run_root/d/'reference_path_differences'/(row['sample_id']+'.json'))
+        self.assertGreater(drift['map_max_abs_difference'],1e-5)
+        self.assertFalse(drift['historical_compatibility_required'])
+
+    def test_old_9_map_profile_cannot_silently_resume_as_new_reference_profile(self):
+        self.a.run_root=self.f.root/'legacy_profile';value=dict(identity='old',prediction_backend=ip.prediction_backend(self.a),config={'version':'shared_residual_translation_v1'})
+        st.sealed_json(self.a.run_root/'inputs.json',value);before=(self.a.run_root/'inputs.json').read_bytes()
+        with self.assertRaisesRegex(ValueError,'immutable record differs'):ip.freeze(self.a)
+        self.assertEqual((self.a.run_root/'inputs.json').read_bytes(),before)
+
+    def test_invalid_zero_against_matched_reference_still_stops(self):
+        d=cfg.DOMAINS[0];row=self.f.rows[d][0];original=rt.translate
+        def corrupt(*args,**kwargs):
+            values,small,diagnostic=original(*args,**kwargs)
+            small['zero_fixed']=small['zero_fixed']+np.float32(3e-5)
+            return values,small,diagnostic
+        with patch.object(rt,'translate',side_effect=corrupt):
+            with self.assertRaisesRegex(ValueError,'zero_direct_vector_score_map'):
+                pred.one(self.a,d,row,rt.References(self.a,d))
         self.assertFalse(ip.record_path(self.a,d,row).exists())
-        checks=ip.rows(self.a.run_root/'failed_baseline_checks.csv')
-        zeros=[r for r in checks if r['check']=='zero_direct_vector_score_map']
+        zeros=[r for r in ip.rows(self.a.run_root/'failed_baseline_checks.csv') if r['check']=='zero_direct_vector_score_map']
         self.assertTrue(any(r['verified']=='False' for r in zeros))
-        self.assertTrue(all(float(r['atol'])==1e-5 for r in zeros))
-        self.assertTrue((self.a.run_root/d/'arithmetic_audit'/(row['sample_id']+'.csv')).exists())
+        self.assertTrue(all(float(r['atol'])==1e-5 and r['reference']==cfg.REFERENCE for r in zeros))
 
     def test_changed_query_provider_rejected_on_predict_resume(self):
         pred.predict(self.a);row=self.f.rows[cfg.DOMAINS[0]][0]

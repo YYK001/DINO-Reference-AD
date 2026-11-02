@@ -43,9 +43,16 @@ def run():
             max_direct_vs_small_FP64_reference_error=float(np.abs(direct-ref).max()),
             positions_rejected_by_old_cross_path_gate=int(np.sum(np.abs(old-direct)>1e-7+1e-6*np.abs(old)))))
     if not any(r['positions_rejected_by_old_cross_path_gate'] for r in cancellation):raise AssertionError('cancellation reproduction absent')
+    q=np.array([[0.],[10.],[20.]],np.float32);banks=[np.array([[0.]],np.float32),np.array([[1.]],np.float32)]
+    ids=np.zeros((2,3),np.int64);ds=np.array([[0.,0.,0.],[1.,1.,1.]],np.float32)
+    vector,vs,vd=nm.translate(q,banks,ids,ds)
+    tensor,ts,td=rt.translated_gpu(q,banks,ids,ds,Search(),[0,1],2)
+    np.testing.assert_array_equal(ts['union_source'],[0,1,1]);np.testing.assert_array_equal(ts['union_source'],vs['union_source'])
+    for b in vector:np.testing.assert_allclose(vector[b],tensor[b],atol=1e-7,rtol=1e-6)
+    assert td['legacy_source_switch_count']==vd['legacy_source_switch_count']==2
     if torch.cuda.is_initialized():raise RuntimeError('unexpected CUDA initialization')
     return dict(status='stock_torch_CPU_verified',torch=torch.__version__,device='cpu',cuda_initialized=False,cases=cases,
-                synthetic_MM_cancellation=cancellation)
+                synthetic_MM_cancellation=cancellation,direct_selection_case=dict(winners=ts['union_source'].tolist(),legacy_switch_count=2,verified=True))
 
 
 if __name__=='__main__':

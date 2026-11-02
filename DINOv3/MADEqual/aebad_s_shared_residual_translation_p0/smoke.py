@@ -33,8 +33,8 @@ def launch_check(a):
     cpu_jobs=sum(ev.completed(a,d,b) is None for d in DOMAINS for b in MAPS)
     au_jobs=sum(not (a.run_root/d/'aupro'/(b+'.json')).exists() for d in DOMAINS for b in MAPS)
     if a.stage!='predict':
-        if report['stages'].get('CPU_exact') is not None:remaining+=report['stages']['CPU_exact']*cpu_jobs/9
-        if report['stages'].get('AUPRO') is not None:remaining+=report['stages']['AUPRO']*au_jobs/9
+        if report['stages'].get('CPU_exact') is not None:remaining+=report['stages']['CPU_exact']*cpu_jobs/MAP_JOBS
+        if report['stages'].get('AUPRO') is not None:remaining+=report['stages']['AUPRO']*au_jobs/MAP_JOBS
     if elapsed(a)+remaining>43200:
         raise RuntimeError('projected known cost exceeds12h; obtain explicit consent before --allow-over-12h')
 
@@ -86,8 +86,12 @@ def run(a):
             ii=np.asarray(nearest[f'index{l}'][:,no]);dd=np.asarray(nearest[f'distance{l}'][:,no])
             # Small CPU reference uses ALL physical positions for the same means;
             # a patch-subset mean would define a different method.
-            expected,es,_=nm.translate(qq,banks,ii,dd,chunk=a.vector_chunk)
             actual,ts,_=rt.translate(a,qq,banks,ii,dd,refs,keys)
+            # Validate the producer's DIRECT winning source within the same raw
+            # norm tolerance, then shadow those exact anchors for the CPU mean.
+            # Near ties across CPU/CUDA reductions must not silently choose two
+            # different residual sets when validating the same production map.
+            expected,es,_=nm.translate(qq,banks,ii,dd,chunk=a.vector_chunk,union_source_override=ts['union_source'])
             left={**expected,**{k:es[k] for k in ('zero_fixed','zero_reselect')}}
             right={**actual,**{k:ts[k] for k in ('zero_fixed','zero_reselect')}}
             for b in left:
@@ -119,7 +123,6 @@ def run(a):
     if a.benchmark_metrics:
         # Surrogate masks only, prior to global freeze. Formal GT is NEVER read.
         # Results discarded; only seconds retained. Same original kernels.
-        from DINOv3.MADEqual.aebad_s_support_witness_segment_p0 import evaluation as backend
         from DINOv3.MADEqual.aebad_s_projection_layer_diagnostic import metrics
         from DINOv3.MADEqual.aebad_s_support_distance_crossdomain.resource_policy import observation_only
         row=ip.parent(a).samples(DOMAINS[0])[0];im,_,_=pred.replay(a,DOMAINS[0],row,C)
@@ -129,8 +132,8 @@ def run(a):
         cpu=time.perf_counter()-tick
         # N log N sort extrapolation, explicit surrogate rather than timing tiny
         # constructed features or treating a whole domain as one image.
-        phases['CPU_exact']=sum(3*cpu*(sum((r['image_height']//4)*(r['image_width']//4) for r in ip.parent(a).samples(d))/im.size)*
-            (np.log2(sum((r['image_height']//4)*(r['image_width']//4) for r in ip.parent(a).samples(d)))/np.log2(im.size)) for d in DOMAINS)
+        phases['CPU_exact']=float(sum(len(MAPS)*cpu*(sum((r['image_height']//4)*(r['image_width']//4) for r in ip.parent(a).samples(d))/im.size)*
+            (np.log2(sum((r['image_height']//4)*(r['image_width']//4) for r in ip.parent(a).samples(d)))/np.log2(im.size)) for d in DOMAINS))
         if a.device.startswith('cuda:'):
             from importlib.metadata import version
             if version('adeval')!='1.1.0':raise ValueError('ADEval1.1.0 required')
@@ -138,10 +141,10 @@ def run(a):
             from DINOv3.relation_reliability.official_metrics import official_aupro_adeval
             torch.cuda.set_device(torch.device(a.device));tick=time.perf_counter()
             official_aupro_adeval([yy],[im],nstrips=200);au=time.perf_counter()-tick
-            phases['AUPRO']=3*au*sum((r['image_height']//4)*(r['image_width']//4) for d in DOMAINS for r in ip.parent(a).samples(d))/im.size
+            phases['AUPRO']=len(MAPS)*au*sum((r['image_height']//4)*(r['image_width']//4) for d in DOMAINS for r in ip.parent(a).samples(d))/im.size
     total=sum(v for v in phases.values() if v is not None)
     result=dict(status='full_image_smoke_estimate',identity=ip.signature(a,DOMAINS[0])['identity'],prediction_backend=backend,samples=samples,
-        stages=phases,known_seconds=total,total_seconds=None if any(v is None for v in phases.values()) else total,
+        stages=phases,job_plan=job_plan(),known_seconds=total,total_seconds=None if any(v is None for v in phases.values()) else total,
         unknown_stages=[k for k,v in phases.items() if v is None],
         interpretation='cold first-image extrapolation, conservative; CPU NlogN and AUPRO pixel scaling only if explicitly measured with synthetic masks; actual GT component count remains uncertain',
         unknown_is_not_zero=True,over_12h=total>43200,previous_unmeasured_resource_plan=prior.get('RAM_GiB_planning_range'))

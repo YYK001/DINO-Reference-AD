@@ -1,4 +1,4 @@
-"""Nine exact CPU and nine original ADEval jobs; three readouts share each map."""
+"""Twelve map jobs: nine candidates plus three matched direct references."""
 from contextlib import ExitStack,contextmanager
 from pathlib import Path
 import tempfile
@@ -75,7 +75,8 @@ def evaluate(a):
                     metrics=[dict(domain=d,branch=b,scoring=rule,image_reference=S if rule=='SEGMENT_CH1' else b,
                                   image_count=len(samples),**image_metrics([r['label'] for r in scores],[r[rule] for r in scores]),
                                   pixel_AUROC=pixel['AUROC'],pixel_AP=pixel['AP'],AUPRO=None,
-                                  image_metrics_inherited=rule=='SEGMENT_CH1',metric_origin='new_exact_common902') for rule in READOUTS]
+                                  image_metrics_inherited=rule=='SEGMENT_CH1',metric_origin='new_exact_common902',
+                                  numeric_path='direct_FP32',branch_role='matched_uncorrected_reference' if b==REFERENCE else 'candidate') for rule in READOUTS]
                 st.write_csv(out/'metrics.csv',metrics);st.write_csv(out/'map_manifest.csv',records);st.write_csv(out/'per_image_scores.csv',scores)
                 names=('metrics.csv','map_manifest.csv','per_image_scores.csv','exact_pixels.json','exact_pixels.seal.json')
                 jobs.append(st.sealed_json(out/'status.json',dict(**ip.signature(a,d),branch=b,images=len(samples),counts=counts,

@@ -62,8 +62,8 @@ def translated_gpu(q,banks,indices,distances,search,keys,chunk):
         qt=search.query(q);n,dim=q.shape
         ids=torch.tensor(indices,device=qt.device,dtype=torch.int64)
         ds=torch.tensor(distances,device=qt.device,dtype=torch.float32)
-        win=ds.argmin(0);ru=torch.empty_like(qt);means=[];rnorm=[]
-        zero_min=torch.full((n,),torch.inf,device=qt.device)
+        legacy_win=ds.argmin(0);win=torch.zeros_like(legacy_win);ru=torch.empty_like(qt);means=[];rnorm=[]
+        best=torch.full((n,),torch.inf,device=qt.device);direct=[]
         def residual(s):
             bank=search.reference(banks[s],keys[s]);r=torch.empty_like(qt)
             for start in range(0,n,chunk):
@@ -71,31 +71,36 @@ def translated_gpu(q,banks,indices,distances,search,keys,chunk):
             return r
         for s in range(len(banks)):
             r=residual(s);means.append(r.mean(0));length=torch.linalg.vector_norm(r,dim=1);rnorm.append(length.mean())
-            zero_min=torch.minimum(zero_min,length/1280)
-            keep=win==s;ru[keep]=r[keep]
+            direct.append(length/1280)
+            keep=length<best;best[keep]=length[keep];win[keep]=s;ru[keep]=r[keep]
         means=torch.stack(means);delta=ru.mean(0)
-        values={A:torch.linalg.vector_norm(ru-delta,dim=1)/1280,
+        values={REFERENCE:best/1280,A:torch.linalg.vector_norm(ru-delta,dim=1)/1280,
                 B:torch.full((n,),torch.inf,device=qt.device),C:torch.full((n,),torch.inf,device=qt.device)}
         winners={B:torch.zeros_like(win),C:torch.zeros_like(win)}
         for s in range(len(banks)):
             r=residual(s)
             for b,shift in ((B,delta),(C,means[s])):
-                v=torch.linalg.vector_norm(r-shift,dim=1)/1280
+                v=torch.linalg.vector_norm(r-shift,dim=1)
                 keep=v<values[b];values[b]=torch.minimum(values[b],v);winners[b][keep]=s
+        for b in (B,C):values[b]=values[b]/1280
         # A single bulk transfer for small diagnostics; no per-patch synchronize.
         rn=torch.stack(rnorm).cpu().numpy();dn=torch.linalg.vector_norm(means,dim=1).cpu().numpy()
         un=float(torch.linalg.vector_norm(ru,dim=1).mean().cpu());du=float(torch.linalg.vector_norm(delta).cpu())
         result={b:v.cpu().numpy() for b,v in values.items()}
         saved=dict(delta_U=delta.cpu().numpy(),delta_ref=means.cpu().numpy(),union_source=win.cpu().numpy().astype(np.int8),
-                   zero_fixed=(torch.linalg.vector_norm(ru,dim=1)/1280).cpu().numpy(),zero_reselect=zero_min.cpu().numpy(),
+                   legacy_union_source=legacy_win.cpu().numpy().astype(np.int8),direct_distance=torch.stack(direct).cpu().numpy(),
+                   zero_fixed=(torch.linalg.vector_norm(ru,dim=1)/1280).cpu().numpy(),zero_reselect=values[REFERENCE].cpu().numpy(),
                    selected_B=winners[B].cpu().numpy().astype(np.int8),selected_C=winners[C].cpu().numpy().astype(np.int8))
     if any(not np.isfinite(v).all() for v in result.values()) or np.any(result[B]>result[A]+np.float32(1e-7)):raise ValueError('invalid stock FP32 translation')
-    old=distances.min(0)
+    old=result[REFERENCE]
     diag=dict(delta_U_norm=du,mean_union_residual_norm=un,delta_U_ratio=du/un if un else None,zero_union_denominator=un==0,
+              reference=REFERENCE,legacy_source_switch_count=int(np.sum(saved['union_source']!=saved['legacy_union_source'])),
+              legacy_source_switch_fraction=float(np.mean(saved['union_source']!=saved['legacy_union_source'])),
               sources=[dict(source=s,delta_norm=float(dn[s]),mean_residual_norm=float(rn[s]),ratio=float(dn[s]/rn[s]) if rn[s] else None,zero_denominator=bool(rn[s]==0)) for s in range(len(banks))],
               branches={b:dict(mean_distance_before=float(old.mean(dtype=np.float32)),mean_distance_after=float(v.mean(dtype=np.float32)),
                               mean_signed_change=float((v-old).mean(dtype=np.float32)),increased_positions=int(np.sum(v>old)),
-                              source_switch_fraction=0. if b==A else float(np.mean(saved['selected_'+('B' if b==B else 'C')]!=saved['union_source']))) for b,v in result.items()})
+                              source_switch_fraction=0. if b in (REFERENCE,A) else float(np.mean(saved['selected_'+('B' if b==B else 'C')]!=saved['union_source'])),
+                              legacy_source_switch_fraction=float(np.mean((saved['union_source'] if b in (REFERENCE,A) else saved['selected_'+('B' if b==B else 'C')])!=saved['legacy_union_source']))) for b,v in result.items()})
     return result,saved,diag
 
 

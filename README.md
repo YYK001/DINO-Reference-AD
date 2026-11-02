@@ -209,8 +209,10 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 复用原Exact FP32、插值、精确全像素CPU及ADEval1.1.0评价。优先复用seed43分路距离和跨seed共享Source，缺项只显式补算；不构库、不提取Source66、不训练或搜索。双重分块并批量处理八正常参照，GPU使用现成PyTorch算子，无自定义Triton。表A继承同组SEGMENT CH1，表B统一新图MAP_MAX；像素任务不随读出重复。默认无Torch preflight，单GPU、最多8 CPU、逐图续跑、真实正常资产smoke及12h预算边界，无容量准入、自动安装或关机。96项本地CPU测试及3组独立PyTorch CPU核对通过；真实CUDA、完整补算和正式新指标尚未执行。本地盘点、数据、权重、缓存和结果不上传。
 
 
-## 查询图内共享残差平移：固定验证
+## 查询图内共享残差平移：同口径直接范数参照
 
-[公式、资产复用和单卡工作站入口](DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/README.md)及[实现审计与检查清单](DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/implementation_audit.md)。固定三域902张共同名单、seed42完整K8、原增强Source100K/层及原Source MAD；三个候选共用9来源原Exact锚点，C为预定主候选。每图每层完整唯一物理网格FP32均值，不用GT筛位置，不平移后重搜，不与旧距离取min。
+[固定公式、资产复用和单卡工作站入口](DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/README.md)及[实现审计与检查清单](DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/implementation_audit.md)。三域902张共同名单、seed42 K8、原增强Source100K/层和Source MAD/层权重保持；A/B/C共用原9来源Exact锚点，C为主候选。新增直接范数UNION参照，A固定来源及A/B共享均值以同一未缩放直接范数赢家确定，旧MM胜出来源和指标独立审计。
 
-原Source统计权重定位、候选自身CH1及固定SEGMENT CH1明确分表，补充WEIGHTED_MAP_MAX；9张新图只计算9项精确CPU/AUPRO。支持完整特征和可靠NN复用、显式补缺、逐图续跑、真实整图smoke及12h授权边界。默认不导入Torch的preflight，单GPU、最多8 CPU，无训练/校准重拟合/Source重建、自动安装、容量准入或关机。131项CPU回归测试通过，含后端混用修复及MM/直接范数算术审计；真实零修正CH1/地图兼容性仍按原1e-5检查；后处理设备与预测生产后端分离。真实CUDA、提取/检索、整图测速及正式效果待用户运行。本机资产、测试日志和结果不上传。
+候选自身CH1、固定SEGMENT CH1、WEIGHTED_MAP_MAX分表；原SEGMENT CH1＋新直接范数Source图为强参照，组合无额外地图/AUPRO。三域12项精确CPU＋12项ADEval（候选9＋参照3）；零修正地图/CH1对新参照仍要求1e-5，同路径CPU/Torch仍atol1e-7、rtol1e-6。新旧参照指标、地图/评分差与来源切换独立输出，数值路径变化不计作方法收益。
+
+原特征、memory及可靠NN按自身依赖复用；新v2使用新run/cache，拒绝旧协议/异后端混用。真实整图smoke与12h边界，单GPU、最多8 CPU，无Source重建、重新校准、训练、容量准入、自动安装或关机。139项CPU回归及独立现成Torch CPU核验通过；真实v2 CUDA、完整测速与正式效果待用户执行。本机资产、日志和结果不上传。

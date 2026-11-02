@@ -1,147 +1,104 @@
-# 查询图内共享残差平移：固定验证
+# 查询图内共享残差平移：同口径直接范数参照 v2
 
-状态：本地实现和CPU验证；等待review。没有授权或执行服务器连接、本地CUDA、真实特征提取、训练或正式评价。此目录是一套薄适配工具，不修改任何历史实验。
+用户已授权三域直接范数参照及其3项CPU＋3项AUPRO，并继续既定实验。服务器命令由用户手动执行；本地没有连接服务器、初始化CUDA或执行真实提取/正式评价。历史结果只读保留。
 
-## 固定问题和公式
+## 固定数据与候选
 
-检验查询图内的参照残差均值能否改善真实扰动下的五项指标。不预设它是真实采集状态，不承诺缺陷保持或创新。
+原seed42增强Source、455训练/66校准、每层100K、完整K8、L7/15/23/31、1280维及原完整视野保持不变。共同名单来自两K8实验，排除seed42/43支持并集。seed43仅用于确认排除名单，不读取其特征或统计。
 
-Source为原seed42、455训练/66校准、实际构库增强、每层100K原始bank。只用seed42每域完整K8；四层L7/15/23/31、1280维、原完整视野和Exact FP32。共同名单来自 `aebad_target_loo_two_K8_20261030_013433`：
-
-|域|正常|异常|总数|
+|域|正常|异常|合计|
 |---|---:|---:|---:|
 |background|77|212|289|
 |illumination|59|198|257|
 |view|76|280|356|
 |合计|212|690|902|
 
-共同名单排除seed42/43支持的并集；seed43仅用于确认排除名单，不读取其特征、统计、权重或检索结果。这三个域有开发历史，不是盲测。
+三域有开发历史，不是盲测集。每图每层使用全部唯一物理patch，包括正在评分的位置，不是盲点估计。
 
-对每图、每层的每个唯一物理patch，从Source和8张支持分别取原始Exact Top1锚点。记残差 `r_s = q - m_s`、原UNION胜出来源 `s*`，`r_U=r_s*`，`delta_U=mean_i(r_U)`、`delta_s=mean_i(r_s)`。同距优先Source，再依支持顺序。
+原Exact FP32从Source和8张支持各取一个Top1锚点，9个候选保持不变。记 `r_s=q-m_s`。在**除1280前**用FP32直接范数选择 `s*=argmin_s norm(r_s)`，同距按Source、原支持顺序优先。令 `r_U=r_s*`、`delta_U=mean_i(r_U)`、`delta_s=mean_i(r_s)`。
 
-|分支|最终原始距离|
+|分支|原始距离|
 |---|---|
-|MEAN_U_FIXED（A）|norm(r_U−delta_U)/1280|
-|MEAN_U_RESELECT（B）|min_s norm(r_s−delta_U)/1280|
-|MEAN_REF_RESELECT（C，固定主候选）|min_s norm(r_s−delta_s)/1280|
+|UNION_DIRECT_SOURCE_WEIGHT（新未修正参照）|min_s norm(r_s)/1280|
+|MEAN_U_FIXED（A）|norm(r_U-delta_U)/1280|
+|MEAN_U_RESELECT（B）|min_s norm(r_s-delta_U)/1280|
+|MEAN_REF_RESELECT（C，预定主候选）|min_s norm(r_s-delta_s)/1280|
 
-均值在除1280前以FP32求取。全图位置等权，包含当前被评分位置；不是盲点或独立估计。没有筛正常patch、GT、前景mask、跨图信息、截尾、聚类、门控、迭代或强度扫描。B/C始终只有9个原锚点，不对平移后的查询重搜memory；不与旧距离取min，允许距离升高。A→B拆分候选重选，B→C拆分分来源均值，不能假设C比B更小。
+均值在原特征单位以FP32求取，最终距离只除一次1280。A固定锚点及A/B共享均值采用新直接范数胜出来源。候选公式和强度不变，但新旧胜出来源不同时A/B数值可变化；不声称与旧路径逐元素不变。B/C只重选这9个原锚点，不对平移query全库重搜。没有GT筛点、截尾、门控、参数搜索、与旧距离取min或重新校准；允许距离升高，不假设C≤B。
 
-## 评分和评价
+## 评分、评价与数值审计
 
-所有新分支继承原Source patch/image MAD，完全不重新拟合。不截负z，不做逐图min-max，不使用Target-LOO权重。
+原Source patch/image MAD及Source层权重不变。定位复用原native四层FP32加权及FP32插值；CH1独立复用statistics/ch1_score，不把地图最大值当CH1。不截负z、不逐图归一化。
 
-定位调用原 `target_loo_layer_weight_p0.numerics.weighted`：原生四层FP32、冻结Source u权重、再原FP32插值。CH1通过原 `statistics` 和 `ch1_score` 从各层候选响应独立取得峰值及原生valid3×3统计，绝不将PL评分当作CH1。
+- 表A：候选自身CH1＋自身Source加权图，主要对照新直接范数参照的CH1＋Source加权图。
+- 表B：原SEGMENT CH1＋候选图，主要对照 `SEGMENT_SCORE_DIRECT_SOURCE_WEIGHT_MAP`（同一SEGMENT CH1＋新直接范数参照图）。该组合直接引用参照图，额外地图/AUPRO为0；图像指标全部继承。
+- 补充统一报告WEIGHTED_MAP_MAX，不改称CURRENT、不按域挑读出。
 
-- 表A：候选自己的CH1与候选Source加权图；统一未修正参照为UNION CH1＋UNION_SOURCE_WEIGHT图。
-- 表B：所有新图配同组SEGMENT CH1，比较现有SEGMENT CH1＋UNION_SOURCE_WEIGHT强组合。图像指标是继承值，不能算新收益。
-- 补充：候选图最大值 `WEIGHTED_MAP_MAX`，不称CURRENT/CH1，不按域选读出。
+原UNION、SEGMENT、Source加权及固定组合原指标保留，标为历史MM路径。新增参照独立计算五项指标；新旧变化只计入数值路径审计，不计作方法收益。
 
-保留历史UNION、SEGMENT、SEGMENT评分＋UNION图、Source加权图及其固定组合的原指标和来源。三种图像读出共享像素评价；3域×3张新图＝9个CPU定位作业、9个AUPRO作业。原五项指标、完整GT/resize、ADEval1.1.0/200阈值/FPR≤0.3不变。全部新预测无GT冻结后，才允许评价读GT。各域等权macro，不池化902张图。缺项保留pending/空值，不填0。
+定位与像素评价共 **3域×4张图=12项CPU＋12项AUPRO**（候选9、参照3），三种读出共享像素/AUPRO。保留原完整GT/resize、精确CPU像素排序、ADEval1.1.0、200阈值、FPR≤0.3，不改后端或采样。所有预测无GT冻结后才允许正式评价读GT；逐域报告及三域等权macro，不池化902张图。缺项保持pending，不填0。
 
-## 输入分级和复用
+数值核查保持：旧Exact UNION→旧z/地图/评分仍按原检查；**零修正固定/重选图及CH1只对照新直接范数参照，atol仍1e-5**。CPU/现成Torch直接范数对照仍为atol1e-7、rtol1e-6。CPU验证在原raw容差内核对生产后端的直接范数胜出锚点，再使用同一集合复核全图均值；正式路径自行按直接范数选择，不读取CPU选择。这样避免CPU/CUDA近同距选择不同集合后误比较不同均值。
 
-1. **完整query特征**：q7/q15/q23/q31、positions、grid及完整提取/图像/provider身份；只有logit、距离或地图不够。复用原 `joint_reference_response.runtime.features` 和 `feature_identity.proof`；支持 `metadata.image` 与 `metadata.sample` 两类既有schema。
-2. **memory向量**：原Source `source_original` bundle，完整seed42支持特征。Source缺失只能恢复原库，工具没有重建入口；不需要Source锚点原图坐标/邻域。
-3. **逐来源NN**：同一完整query/Source/支持顺序绑定的9×N距离和9×N索引，四层各一份。齐全时直接取回锚点，无需模型和Exact。只有Source/聚合Target索引不是9来源索引；有索引但不能证明对应查询向量和bank，不自动接纳。
-4. **旧标量图**：只用于必要的原UNION/SEGMENT、评分及地图身份复核；不能倒推残差。
+逐图逐层保存原MM与直接范数距离差、同旧锚点误差、胜出来源切换、固定/重选零修正结果和新旧地图/评分差。它们是描述性差异，不能称跨路径兼容通过。原容差下真实同路径错误仍停止并保留现场。
 
-默认读取已信任本地NPY的manifest/header和实际使用的数值，不逐阶段重扫大文件SHA。新数组写入时记录一次SHA；小manifest/指标和逐图地图身份继续核对。旧manifest保持只读。检查全表见 `implementation_audit.md`。
+## 资产复用与检查边界
 
-原Exact的FP32矩阵求距与直接残差范数存在消减误差差异，逐图记录在arithmetic_audit，最终汇入arithmetic_path_comparisons.csv，不将该差异自动当作索引错误或“校验通过”。CPU/GPU同路径直接范数仍以atol1e-7、rtol1e-6核对；实际零修正后固定/重选图与父Source加权图、原UNION CH1仍以原atol1e-5核对。若真实地图/评分不兼容会停止，不能靠本修复强行复用父指标。三个候选公式和强度保持不变。
+需要完整query特征、原Source向量、24张seed42完整支持、四层有序9来源NN及旧标量预测。仅有距离/地图不能倒推残差。支持metadata.image和metadata.sample两种既有完整特征格式；feature_identity.proof绑定图像、checkpoint、预处理、精度和provider。NN contract绑定完整query、Source seal、有序支持及物理位置。
 
-可用 `--feature-manifest` 指定现有封存完整特征导出。`--nn-provider` 支持本工具NN bundle的只读导出，格式如下（通过共享st.sealed_json封存）：
+完整兼容输入可只读复用，无需模型；缺query/支持需显式 `--extract-missing`，缺NN需 `--supplement-retrieval`。每图最多一次完整query前向、36次原Exact，四张图共享，不四倍检索。不重建Source、不重新提取455/66、不训练。Source/旧标量缺失时需恢复，工具不自动重建。
 
-```python
-{'records': {'background/test_0000': {'path': '/.../nearest/background/test_0000', 'seal': '...'}}}
-```
+默认trusted-local fast：大数组消费时读manifest/header及所需值，不逐阶段重新扫描SHA；新数组写入时记一次SHA。小封存、预测/地图身份和范围检查保留。完整检查清单见implementation_audit.md。无RAM/显存/磁盘容量前置阻断、自动安装、关机、第二卡或自定义Triton。
 
-bundle中有 `positions`、`distance7/index7` 等四层字段及metadata.contract。contract绑定query provider、完整extraction、Source seal、seed42有序K8和支持特征seals。不能只填路径伪造来源。现有其他格式若不满足这项证明，预检将其列为未确认，而非靠距离接近接纳。
+新v2使用**新run/cache**，旧失败目录不迁移、不重写。原始memory/完整特征按自身依赖复用。失败首图未持久化完整q时可能需再前向/检索；不伪称旧NN已被证明对应新q。预测后端在首次preflight冻结；CPU/CUDA切换需新目录及新smoke。CPU评价/AUPRO执行设备与冻结预测生产后端分开记录。
 
-查询缺失时，后续需显式 `--extract-missing` 才能原完整前向，每图最多一次，供三候选与基线共享；默认不落盘全部query特征。支持缺失同样显式补取、持久保存24份。索引缺失需显式 `--supplement-retrieval`，每图4×9＝36个原Exact，共用结果。不重新提取Source455/66，不训练，不重新校准。
+本地v2盘点：`DINOv3/outputs/mad_equal/aebad_shared_residual_preflight_20261102_v7/`。当前本地指定路径缺Source向量1、支持24、完整query902、旧标量902、9来源NN902。父小metadata/名单/分数/MAD/Source权重及本地GT路径索引可用；4份review包仅复用归档索引，没有重复解压。服务器实体是否齐全需用户手动preflight，本地缺失不等于服务器已丢失。
 
-## 本地盘点
+## 手动工作站入口
 
-最终本地预检及缺失清单位于：
-
-`DINOv3/outputs/mad_equal/aebad_shared_residual_preflight_20261102_v5/`
-
-该目录包括preflight、asset_inventory、missing_inputs、necessary_repetition、local_archive_inventory、server_confirmation和time_estimate。v5仅将cuda:0记为计划后端，用于验证元数据预检无需导入Torch或初始化CUDA；没有运行CUDA。原4份相关review包只盘点归档目录，没有重复解压大包。报告在≠向量在。
-
-本地已确认：共同名单、seed42原分数/指标/GT身份、Source MAD/权重、小metadata，以及AeBAD.zip中的GT路径。当前指定供应路径缺902份完整query、24份完整支持特征、1份Source向量库、902份9来源NN及902份原标量预测bundle。服务器实体是否在不能靠本地报告断定，需用户手动运行preflight确认，不要求取回权重或Source大库到本地。
-
-## 阶段命令（仅准备，尚未执行）
-
-本地默认只预检，不导入Torch：
-
-```powershell
-python -B -m DINOv3.MADEqual.aebad_s_shared_residual_translation_p0.runner preflight --run-root DINOv3/outputs/mad_equal/shared_residual_inventory_new
-```
-
-使用项目已有Python≥3.10环境，不安装或升级环境。以下为已有工作站的人工命令；代码发布/服务器执行需后续授权。本脚本不自行git同步、挂载磁盘或安装依赖。
-
-预测后端在首次预检时冻结：包括NumPy CPU／现成Torch CUDA、设备选择、FP32策略和软件版本。若计划用GPU，应在同一新运行的preflight前设置GPU_INDEX（或直接传 `--device cuda:0`）；这只记录计划，不导入Torch或初始化CUDA。CPU→CUDA等后端变更必须使用新的run/cache并重新做该后端smoke，不能混合续跑。旧版未记录后端的目录明确拒绝复用，不自动补写身份。完整特征和原memory仍可按各自身份只读复用。
-
-CPU评价、CUDA AUPRO和汇总使用已冻结预测，不因其自身执行设备改变而改写预测后端；这些后处理阶段可继续引用原生产后端。
+只用现有yyk环境，物理GPU1、最多8 CPU。脚本默认preflight，不自行git同步、挂载或安装。GPU_INDEX在新目录首次preflight前指定，仅记录计划，不初始化CUDA。
 
 ```bash
 source /home/ubun/miniconda3/etc/profile.d/conda.sh
 conda activate /home/ubun/YYK/conda_envs/yyk
 cd /home/ubun/YYK/DINO-Reference-AD
-
-export RUN_TAG=aebad_shared_residual_seed42_$(date +%Y%m%d_%H%M%S)
+export RUN_TAG=aebad_shared_residual_directref_$(date +%Y%m%d_%H%M%S)
 export RUN_ROOT=/home/ubun/YYK/runs/$RUN_TAG
 export CACHE_ROOT=/home/ubun/YYK/storage/shared_residual_cache/$RUN_TAG
-export GPU_INDEX=1  # 必须由用户确认的一张物理卡；程序内cuda:0
+export GPU_INDEX=1
 script=DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/scripts/run_workstation.sh
-
 bash "$script" preflight
-# 缺失清单允许列出可以显式补算的query/NN；Source/旧标量baseline必须恢复。
-# 真实少量完整图测速：每域固定首张，共3张；包含真实特征/原Exact、取向量、修正及写盘。
+# exit2可表示尚待显式补算的query/NN；先看缺项分类，Source/旧标量必须在。
 bash "$script" smoke --supplement-retrieval --extract-missing --benchmark-metrics
 cat "$RUN_ROOT/time_estimate.json"
+bash "$script" all --supplement-retrieval --extract-missing
 ```
 
-smoke原本已存在的query/NN会复用，三张正式候选产物直接供predict续用。中断后复用已提交的逐域完整图测速；若某图先前已完成但没有完整测速记录，按名单选择首张尚未完成图，避免重复前向。全图均值不能用少量patch均值代替；CPU与现成Torch核对因此使用完整实际网格。测速无需GT，CPU/AUPRO可选代理mask只测耗时并丢弃指标；不冒充正式评价。缓存齐全时不加载checkpoint或骨干。新提取需复用原环境和checkpoint。
+正式命令应置于tmux；相同run/cache可续跑。all执行predict→evaluate→aupro→summarize→pack，不隐藏扩域、拟合或参数扫描。smoke每域按固定名单首张完整图，共3张，已提交预测供predict复用；可按逐域smoke记录续跑。没有重复的模型前向用于测速。CPU核对用完整网格均值，不能用小patch子集均值替代。
 
-通过review、测速和必要授权后，人工后台执行：
+预算必须含新增参照3项CPU＋3项AUPRO。真实完整图smoke外推前向/原Exact/向量修正/写盘，额外CPU数值验证单列、不乘902。可选代理mask用原CPU/AUPRO仅测速，结果丢弃，不当正式指标；CPU按NlogN、AUPRO按像素外推，真实连通区域仍不确定。未知项为null，不当0。已提交资产不计入待办预算。预计或累计超过12h停止保留断点，须新获同意才可传 `--allow-over-12h`；用户本次未授权超限。
 
-```bash
-tmux new-session -d -s "$RUN_TAG" \
-  "cd /home/ubun/YYK/DINO-Reference-AD && env RUN_TAG='$RUN_TAG' RUN_ROOT='$RUN_ROOT' CACHE_ROOT='$CACHE_ROOT' GPU_INDEX='$GPU_INDEX' bash '$script' all --supplement-retrieval --extract-missing > '${RUN_ROOT}_launcher.log' 2>&1"
-tail -n 40 -F "${RUN_ROOT}_launcher.log"
-```
+## 成本及输出
 
-`all`只执行predict→evaluate→aupro→summarize→pack，不隐藏运行smoke、重新拟合或扩域。各阶段也可单独调用同一脚本。相同run/cache/profile续跑只补未完成图/评价，已完成结果验证小封存后复用。已有GPU数值smoke可复用；默认preflight无需GPU。任何12h超限需用户显式同意后才传 `--allow-over-12h`；该flag不代表本轮授权。没有关机或第二卡逻辑。
+原始query/NN齐全时零模型前向/检索；否则最多902个query＋缺失支持前向和32472次原Exact。902图统一处理三候选与一个直接范数参照。评价12 CPU＋12 AUPRO；组合0额外任务。
 
-## 成本与资源：尚未做真实测速
+未做真实v2测速，不承诺总时长。父24定位CPU约610秒、AUPRO约204秒，12作业粗比例约305/102秒，只是不同运行历史参考。总时间以真实smoke为准。按13924 patch规划新增紧凑缓存8–11GiB；不保存9×N×1280残差。若持久化902完整query约240GiB，默认关闭。RAM6–18GiB、VRAM6–20GiB、评价scratch3–12GiB仅规划未实测，不是容量准入条件。参照GPU缓存8GiB有界，Exact原分块，FP32现成Torch，不引入TF32/BF16/全流程FP64。
 
-|阶段|完整query＋NN齐全|缺query/NN|
-|---|---|---|
-|补特征|0前向|最多902查询＋缺失的24支持，原完整前向|
-|原Exact|0|最多32472次查询检索；无Source重建|
-|向量取回、均值、三修正、写盘|902张全量工作|同左，共用9候选，不三倍检索|
-|CPU精确定位|9作业|9作业|
-|原ADEval|9作业|9作业|
-|汇总打包|小报告|小报告|
+输出metrics.csv、metric_comparisons.csv、objective_report.md、逐图分数、诊断、timings/costs、资源记录及状态。另输出：
 
-真实前向/检索/IO和残差修正时间当前未知，time_estimate的未知项是null，不当0。最近联合响应运行902前向＋Target检索记录约51分钟，仅作不同工作的历史参照；本轮还可能需要完整Source检索，不能套用该时间。父24定位作业CPU约610秒、AUPRO约204秒，本轮9作业粗比例约229/76秒，仅是参考，分数分布、连通区域及磁盘会改变时间，不是实测承诺。全轮时间必须按上述实际完整图smoke更新。
+- arithmetic_path_comparisons.csv：旧MM/直接范数及同锚点距离差。
+- source_selection_switches.csv：domain＋sample_id＋layer的新旧胜出来源切换数量/比例。
+- reference_map_score_changes.csv：逐图新旧参照地图/CH1差。
+- numerical_path_metric_changes.csv：逐域及macro新旧参照五项指标变化。
+- 每域每图独立预测身份，12项CPU/AUPRO完成记录；组合不新增记录。
 
-按13924物理patch估算新增紧凑缓存约5–8GiB（主要为四层9来源int64索引与FP32距离）；不会保存所有1280维残差。完整query全部持久化约240GiB，默认禁用。已有Source/支持向量额外保留，不重复复制。RAM规划6–18GiB，VRAM规划6–20GiB，CPU临时盘规划3–12GiB，均未验证且不是资源准入门槛。参照GPU常驻缓存8GiB有界；Source/Target分层取向量，原Exact自身分块。不新增全局FP64、BF16、TF32、自定义Triton或混合精度配置。CPU上限8、BLAS线程1。
+review包排除大数组、scratch、checkpoint和软链接。主判断看C及A/B的完整五项指标、B−A/C−B、三域取舍与同口径强参照。小距离不等于检测收益，不保证缺陷保持，不自动追加参数或规则。
 
-smoke将冷启动、真实完整图处理和额外一致性验证分别记录；不把CPU构造数据当真实模型吞吐。计划>12h先停等用户同意，运行中超限在已提交单位后停并保留断点，不减少图/支持/指标。
-
-## 交付与结果边界
-
-正式产物：metrics.csv、metric_comparisons.csv、per_image_scores.csv、diagnostics.csv、source_mean_diagnostics.csv、numerical_verification.csv、每图timings和各阶段costs、每域9项CPU/AUPRO独立完成记录、objective_report.md、status.json及小review包。delta向量、来源切换和9来源索引在紧凑NPY缓存中；零分母独立标记，ratio为NA。review包排除scratch、大数组、checkpoint和软链接。
-
-判断以C及全部A/B五项指标和三域取舍为准；同时给B−A、C−B及相对Source强参照差值。候选自身检测与固定任务分工明确分表。无结果前保持pending；不因距离下降就宣称有效，不根据结果自动延伸方法或否定其他充分训练方案。
-
-CPU测试可在已有环境执行，不初始化CUDA：
+本地CPU验证，不初始化CUDA：
 
 ```bash
 python -B -m unittest DINOv3.tests.test_aebad_s_shared_residual_translation -v
 python -B -m DINOv3.MADEqual.aebad_s_shared_residual_translation_p0.verify_stock_cpu
 ```
 
-第二条仅使用已安装Torch的CPU设备。源码仓库不包含父review包时，真实metadata测试类明确skip；数值、续跑、后端绑定及小夹具评价仍执行。本地验证日志和validation_results.json不上传GitHub。完整结果与尚未验证项见implementation_audit.md；正式服务器执行需要用户授权。
+Torch CPU核验独立进程执行。源码仓库不含父小metadata时该测试类明确skip；夹具评价和模拟AUPRO提交不代表真实ADEval实验。本地日志、validation_results和preflight不上传Git。真实CUDA、3张完整smoke、902张预测及12项正式评价尚未验证。
