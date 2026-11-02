@@ -69,7 +69,7 @@ def historical(a):
 
 
 def summarize(a):
-    p=ip.parent(a);pending=[];rows=historical(a);diag=[];checks=[];scores=[]
+    p=ip.parent(a);pending=[];rows=historical(a);diag=[];checks=[];scores=[];arithmetic=[]
     frozen=None
     try:frozen=pred.global_freeze(a)
     except FileNotFoundError:pending.append('global_prediction_freeze')
@@ -85,6 +85,7 @@ def summarize(a):
             for row in p.samples(d):
                 r=st.sealed_json(ip.record_path(a,d,row))
                 checks.extend(dict(v,domain=d,sample_id=row['sample_id']) for v in r['checks'])
+                arithmetic.extend(r['arithmetic_audit'])
                 for v in r['diagnostics']:
                     for b,z in v['branches'].items():diag.append(dict(domain=d,sample_id=row['sample_id'],layer=v['layer'],branch=b,
                         delta_U_norm=v['delta_U_norm'],mean_union_residual_norm=v['mean_union_residual_norm'],delta_U_ratio=v['delta_U_ratio'],
@@ -97,6 +98,7 @@ def summarize(a):
     st.write_csv(a.run_root/'metrics.csv',rows);st.write_csv(a.run_root/'metric_comparisons.csv',diff)
     st.write_csv(a.run_root/'per_image_scores.csv',scores);st.write_csv(a.run_root/'diagnostics.csv',diag)
     st.write_csv(a.run_root/'numerical_verification.csv',checks)
+    st.write_csv(a.run_root/'arithmetic_path_comparisons.csv',arithmetic)
     source_diag=[]
     if frozen:
         for d in DOMAINS:

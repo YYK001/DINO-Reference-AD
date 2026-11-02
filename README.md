@@ -213,4 +213,4 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 
 [公式、资产复用和单卡工作站入口](DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/README.md)及[实现审计与检查清单](DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/implementation_audit.md)。固定三域902张共同名单、seed42完整K8、原增强Source100K/层及原Source MAD；三个候选共用9来源原Exact锚点，C为预定主候选。每图每层完整唯一物理网格FP32均值，不用GT筛位置，不平移后重搜，不与旧距离取min。
 
-原Source统计权重定位、候选自身CH1及固定SEGMENT CH1明确分表，补充WEIGHTED_MAP_MAX；9张新图只计算9项精确CPU/AUPRO。支持完整特征和可靠NN复用、显式补缺、逐图续跑、真实整图smoke及12h授权边界。默认不导入Torch的preflight，单GPU、最多8 CPU，无训练/校准重拟合/Source重建、自动安装、容量准入或关机。128项CPU回归测试通过，含CPU/CUDA后端身份与smoke/预测混用修复；后处理设备与预测生产后端分离。真实CUDA、提取/检索、整图测速及正式效果待用户运行。本机资产、测试日志和结果不上传。
+原Source统计权重定位、候选自身CH1及固定SEGMENT CH1明确分表，补充WEIGHTED_MAP_MAX；9张新图只计算9项精确CPU/AUPRO。支持完整特征和可靠NN复用、显式补缺、逐图续跑、真实整图smoke及12h授权边界。默认不导入Torch的preflight，单GPU、最多8 CPU，无训练/校准重拟合/Source重建、自动安装、容量准入或关机。131项CPU回归测试通过，含后端混用修复及MM/直接范数算术审计；真实零修正CH1/地图兼容性仍按原1e-5检查；后处理设备与预测生产后端分离。真实CUDA、提取/检索、整图测速及正式效果待用户运行。本机资产、测试日志和结果不上传。

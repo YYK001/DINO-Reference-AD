@@ -45,6 +45,12 @@ class FormulaTests(unittest.TestCase):
         q,b,i,d=problem();actual,_,_=nm.translate(q,b,i,d,delta_override=(np.zeros(q.shape[1]),np.zeros((9,q.shape[1]))))
         for x in actual.values():np.testing.assert_allclose(x,d.min(0),atol=1e-7,rtol=1e-6)
 
+    def test_zero_arrays_match_actual_zero_formula(self):
+        q,b,i,d=problem();_,small,_=nm.translate(q,b,i,d)
+        zero,_,_=nm.translate(q,b,i,d,delta_override=(np.zeros(q.shape[1]),np.zeros((9,q.shape[1]))))
+        np.testing.assert_array_equal(small['zero_fixed'],zero[cfg.A])
+        for key in (cfg.B,cfg.C):np.testing.assert_array_equal(small['zero_reselect'],zero[key])
+
     def test_against_small_fp64_reference(self):
         for seed in range(5):
             q,b,i,d=problem(seed);actual,_,_=nm.translate(q,b,i,d)
@@ -261,6 +267,42 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'no relaxation'):pred.one(self.a,d,row,rt.References(self.a,d))
         self.assertTrue((self.a.run_root/'failed_baseline_checks.csv').exists())
         self.assertFalse(ip.record_path(self.a,d,row).exists())
+
+    def apply_MM_offset_fixture(self,bias):
+        # Controlled cross-path difference; only this tiny fixture is changed.
+        d=cfg.DOMAINS[0];row=self.f.rows[d][0];original=self.f.nearest
+        def shifted(domain,q):
+            result=original(domain,q)
+            result['distance7']=result['distance7']+np.float32(bias)
+            return result
+        self.f.nearest=shifted
+        x=self.f.old[d,row['sample_id']];x[cfg.U][0]+=np.float32(bias/self.f.patch['scales'][0])
+        record=self.f.records[d,row['sample_id']]
+        for branch in (cfg.U,cfg.SOURCE):
+            im,sc=(nm.weighted(x[cfg.U],x['positions'],[3,3],[4,4],self.f.weights[d]) if branch==cfg.SOURCE else
+                   response(x[cfg.U],x['positions'],[3,3],[4,4],self.f.state))
+            record['scores'][branch]=sc;record['map_hashes'][branch]=pred.shared.array_sha(im)
+        return d,row
+
+    def test_cross_path_drift_is_audit_but_true_zero_maps_still_pass(self):
+        d,row=self.apply_MM_offset_fixture(3e-7)
+        self.assertTrue(pred.one(self.a,d,row,rt.References(self.a,d)))
+        rec,_,_=pred.verify(self.a,d,row)
+        self.assertGreater(rec['arithmetic_audit'][0]['positions_over_original_raw_tolerance'],0)
+        checks=[r for r in rec['checks'] if r['check']=='zero_direct_vector_score_map']
+        self.assertEqual(len(checks),2);self.assertTrue(all(r['verified'] for r in checks))
+        self.assertTrue(all(r['atol']==1e-5 for r in checks))
+
+    def test_actual_zero_map_incompatibility_still_stops_at_original_tolerance(self):
+        d,row=self.apply_MM_offset_fixture(3e-5)
+        with self.assertRaisesRegex(ValueError,'zero_direct_vector_score_map'):
+            pred.one(self.a,d,row,rt.References(self.a,d))
+        self.assertFalse(ip.record_path(self.a,d,row).exists())
+        checks=ip.rows(self.a.run_root/'failed_baseline_checks.csv')
+        zeros=[r for r in checks if r['check']=='zero_direct_vector_score_map']
+        self.assertTrue(any(r['verified']=='False' for r in zeros))
+        self.assertTrue(all(float(r['atol'])==1e-5 for r in zeros))
+        self.assertTrue((self.a.run_root/d/'arithmetic_audit'/(row['sample_id']+'.csv')).exists())
 
     def test_changed_query_provider_rejected_on_predict_resume(self):
         pred.predict(self.a);row=self.f.rows[cfg.DOMAINS[0]][0]

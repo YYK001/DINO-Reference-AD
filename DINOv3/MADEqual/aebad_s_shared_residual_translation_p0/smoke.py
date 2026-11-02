@@ -86,10 +86,12 @@ def run(a):
             ii=np.asarray(nearest[f'index{l}'][:,no]);dd=np.asarray(nearest[f'distance{l}'][:,no])
             # Small CPU reference uses ALL physical positions for the same means;
             # a patch-subset mean would define a different method.
-            expected,_,_=nm.translate(qq,banks,ii,dd,chunk=a.vector_chunk)
-            actual,_,_=rt.translate(a,qq,banks,ii,dd,refs,keys)
-            for b in MAPS:
-                err=float(np.abs(expected[b]-actual[b]).max());ok=bool(np.allclose(expected[b],actual[b],atol=1e-7,rtol=1e-6))
+            expected,es,_=nm.translate(qq,banks,ii,dd,chunk=a.vector_chunk)
+            actual,ts,_=rt.translate(a,qq,banks,ii,dd,refs,keys)
+            left={**expected,**{k:es[k] for k in ('zero_fixed','zero_reselect')}}
+            right={**actual,**{k:ts[k] for k in ('zero_fixed','zero_reselect')}}
+            for b in left:
+                err=float(np.abs(left[b]-right[b]).max());ok=bool(np.allclose(left[b],right[b],atol=1e-7,rtol=1e-6))
                 checks.append(dict(domain=d,layer=l,branch=b,max_abs_error=err,atol=1e-7,rtol=1e-6,verified=ok))
         st.write_csv(a.run_root/'smoke_numerical_checks.csv',checks)
         if not all(v['verified'] for v in checks):raise ValueError('stock FP32 full-image translation reference failed; no relaxed tolerance')

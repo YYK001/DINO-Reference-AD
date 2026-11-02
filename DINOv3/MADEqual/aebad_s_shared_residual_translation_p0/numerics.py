@@ -40,14 +40,15 @@ def translate(q, banks, indices, distances, *, chunk=1024, delta_override=None):
     # Source-wise FP32 means have deterministic physical order. At most q plus
     # two N x D buffers; chunk size does not alter the reduction order.
     union_r = np.empty_like(q);means = np.empty((k,dim),np.float32)
-    residual_means = np.empty(k,np.float32)
+    residual_means = np.empty(k,np.float32);zero_min=np.full(n,np.inf,np.float32)
     for s, bank in enumerate(banks):
         r = np.empty_like(q)
         for start in range(0,n,chunk):
             end = min(n,start+chunk);r[start:end] = q[start:end]-np.asarray(bank[ids[s,start:end]],np.float32)
         if not np.isfinite(r).all():raise ValueError('nonfinite original residual')
         means[s] = r.mean(0,dtype=np.float32)
-        residual_means[s] = norm(r).mean(dtype=np.float32)
+        length=norm(r);residual_means[s] = length.mean(dtype=np.float32)
+        zero_min=np.minimum(zero_min,length/np.float32(1280))
         keep = winner==s;union_r[keep] = r[keep]
     delta = union_r.mean(0,dtype=np.float32)
     if delta_override is not None:
@@ -77,6 +78,7 @@ def translate(q, banks, indices, distances, *, chunk=1024, delta_override=None):
                                      increased_positions=int(np.sum(v>original)),
                                      source_switch_fraction=0. if b==A else float(np.mean(new_winner[b]!=winner))) for b,v in result.items()})
     return result,dict(delta_U=delta,delta_ref=means,union_source=winner,
+                       zero_fixed=norm(union_r)/np.float32(1280),zero_reselect=zero_min,
                        selected_B=new_winner[B],selected_C=new_winner[C]),diagnostic
 
 

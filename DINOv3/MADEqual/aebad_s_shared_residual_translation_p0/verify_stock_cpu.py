@@ -25,10 +25,27 @@ def run():
         y,t,_=rt.translated_gpu(q,banks,ids,ds,Search(),list(range(k)),5)
         error=max(float(np.abs(x[b]-y[b]).max()) for b in x)
         for b in x:np.testing.assert_allclose(x[b],y[b],atol=1e-7,rtol=1e-6)
+        for key in ('zero_fixed','zero_reselect'):np.testing.assert_allclose(s[key],t[key],atol=1e-7,rtol=1e-6)
         np.testing.assert_allclose(s['delta_U'],t['delta_U'],atol=1e-7,rtol=1e-6)
         cases.append(dict(seed=seed,sources=k,positions=n,max_distance_abs_error=error,verified=True))
+    # Genuine MM-vs-subtraction cancellation, not an invalid NN or missing bank.
+    from DINOv3.relation_reliability.superadd_host import _exact_top1_chunked
+    rng=np.random.default_rng(19);cancellation=[]
+    for offset in (0.,1.,8.):
+        q=(rng.normal(0,.1,(4,1280))+offset).astype(np.float32)
+        bank=q+rng.normal(0,.01,q.shape).astype(np.float32)
+        exact,ids=_exact_top1_chunked(torch.tensor(q,device='cpu'),torch.tensor(bank,device='cpu'))
+        old=exact.numpy()/np.float32(1280);ii=ids.numpy()
+        direct=nm.norm(q-bank[ii])/np.float32(1280)
+        ref=np.linalg.norm(q.astype(np.float64)-bank[ii].astype(np.float64),axis=1)/1280
+        np.testing.assert_allclose(direct,ref,atol=1e-7,rtol=1e-6)
+        cancellation.append(dict(offset=offset,max_MM_vs_direct_abs_error=float(np.abs(old-direct).max()),
+            max_direct_vs_small_FP64_reference_error=float(np.abs(direct-ref).max()),
+            positions_rejected_by_old_cross_path_gate=int(np.sum(np.abs(old-direct)>1e-7+1e-6*np.abs(old)))))
+    if not any(r['positions_rejected_by_old_cross_path_gate'] for r in cancellation):raise AssertionError('cancellation reproduction absent')
     if torch.cuda.is_initialized():raise RuntimeError('unexpected CUDA initialization')
-    return dict(status='stock_torch_CPU_verified',torch=torch.__version__,device='cpu',cuda_initialized=False,cases=cases)
+    return dict(status='stock_torch_CPU_verified',torch=torch.__version__,device='cpu',cuda_initialized=False,cases=cases,
+                synthetic_MM_cancellation=cancellation)
 
 
 if __name__=='__main__':

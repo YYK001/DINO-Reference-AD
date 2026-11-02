@@ -16,7 +16,7 @@
 1. **父小metadata**：读用户指定的6种名单/输入/汇总文件，核对902人群、seed42 K8顺序和两组支持并集排除。只读seed42结果目录；不打开seed43特征、统计或检索结果。小CPU结果CSV/AUPRO来源和Source权重被原完成记录绑定。
 2. **来源兼容性**：复用feature_identity.proof核对完整checkpoint/预处理/精度/软件/provider manifest。仅在实际补前向时要求checkpoint与骨干，完整缓存后处理不额外要求它们。9来源NN contract绑定query、Source、8个支持以及四层位置和Exact定义；距离近不等于来源相同。
 3. **位置、形状与数值**：完整物理位置一一映射，拒绝缺失和重叠。消费时检查FP32/有限值、9来源索引范围与非负距离；不预扫所有特征数值。
-4. **基线复核**：原Exact UNION经MAD与父z atol1e-5；重建原UNION/SEGMENT/Source权重地图SHA及原评分atol1e-5；零修正评分链路atol1e-5；原向量零修正与Exact距离采用原单位atol1e-7、rtol1e-6。失败保留failed_baseline_checks.csv并停止，不放宽、不拼接新旧指标。
+4. **基线复核**：原Exact UNION经MAD与父z atol1e-5；重建原UNION/SEGMENT/Source权重地图SHA及原评分atol1e-5；原Exact评分链路及实际直接向量零修正（固定/重选）的CH1与Source加权图均保持atol1e-5。CPU/现成Torch的直接范数（含零修正）仍使用原单位atol1e-7、rtol1e-6。不同FP32路径的MM距离/直接范数差异单列arithmetic_audit，只描述差值和超原raw容差数量，不能误称为兼容性通过。真实地图/评分不兼容仍保留failed_baseline_checks.csv并停止，不放宽、不拼接新旧指标。
 5. **预测续跑**：不可变预测身份不含本次前向计数，但绑定NumPy CPU／现成Torch CUDA、设备/可见卡选择、FP32策略及软件版本；逐图预测JSON/数组bundle和smoke整轮/逐域记录一起绑定。切换后端在任何预测或smoke复用前拒绝，12h许可不会绕过该检查。旧未绑定目录拒绝而不补写身份。原始特征、memory和可靠的原检索输入按自身依赖复用，不因后续残差计算后端改变而无意义地重算。复用前核对query/provider及支持seals、Source seal；完整图预测按domain+sample_id存放。CPU评价、CUDA AUPRO及汇总保持已冻结的预测生产后端，不把后处理设备误作后端变更。评价后处理只需冻结紧凑预测，不强制原bank仍挂载。所有图先冻结，无GT。
 6. **评价续跑**：沿用已修复的exact_pixel_result独立seal、结果哈希、[0,1]/有限性、完整像素正负数量；被修改或未封存的中间指标不会重新盖章。AUPRO核对原后端1.1.0、200、0.3、输入图名单与map identity。任何缺项保持pending。
 7. **目录与清理**：新run/cache/scratch互相及父资产不重叠，scratch只删除本轮TemporaryDirectory创建文件。打包类型白名单排除bin/npy/npz/软链接和scratch，不递归吞掉失败评价的大临时文件。
@@ -36,3 +36,13 @@
 ## 2026-11-02：P2后端续跑修复
 
 修复CPU/CUDA切换身份不变、旧smoke被当作新后端验证的问题。新增隔离CPU测试覆盖：仅改变后端即可改变身份；同目录切换拒绝且原记录字节不变；完成/部分smoke拒绝异后端或未绑定记录；部分预测不能混用；相同后端仍正常续跑；旧未绑定目录不迁移；预算override不绕过后端检查；后处理设备与预测生产后端分离。测试仅改变设备字符串和元数据，不调用CUDA。更新后的实际测试记录见validation_results.json及backend_fix_tests.txt。
+
+## 2026-11-02：分离FP32求距路径与真实基线兼容性
+
+用户服务器首图background/test_0000的L7直接残差范数与原MM Exact距离最大差为6.034970283508301e-7；此前四层CPU/GPU直接候选核对已通过。不能把不同浮点求距路径的数学等价写成该raw容差下必然相同。独立CPU调用原_exact_top1_chunked已复现：相同query、bank及正确索引，仅改变公共特征偏置，MM消减误差即可超过旧跨路径门槛。
+
+本修复不修改三候选计算、不放宽任何评分/地图或同路径CPU/GPU容差。跨路径差异保留为描述性记录；同时补上此前缺少的真实零向量修正CH1/地图检查（原函数此前用的仍是原Exact raw，属于自比较）。实际零修正的固定/重选图不满足1e-5时继续停止，不能据此自动启用重评基线、近似口径或混合指标。
+
+每图紧凑缓存增加zero_fixed/zero_reselect距离，约增加0.38GiB（13924 patch、902图），仍在原5–8GiB规划内。没有保存全部残差。算术差异在每图CSV及最终arithmetic_path_comparisons.csv报告，不记作verified成功。CPU小夹具覆盖误拒复现、真实兼容性超差仍拒绝、零修正数组与公式一致；并对照0eb9529验证三个候选NumPy和现成Torch CPU输出逐元素不变。真实CUDA新复核仍需用户执行。
+
+改动后的代码身份需要新run/cache，旧失败目录只读保留。原bank与支持特征继续复用。失败首图若未持久化完整q，则需要再次前向及对应检索；本次启动不把该首图旧NN导入新目录，不为省少量首图计算而改写旧NN身份。本轮没有重建Source、重校准或自行连接服务器。

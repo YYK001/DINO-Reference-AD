@@ -48,6 +48,8 @@ Source为原seed42、455训练/66校准、实际构库增强、每层100K原始b
 
 默认读取已信任本地NPY的manifest/header和实际使用的数值，不逐阶段重扫大文件SHA。新数组写入时记录一次SHA；小manifest/指标和逐图地图身份继续核对。旧manifest保持只读。检查全表见 `implementation_audit.md`。
 
+原Exact的FP32矩阵求距与直接残差范数存在消减误差差异，逐图记录在arithmetic_audit，最终汇入arithmetic_path_comparisons.csv，不将该差异自动当作索引错误或“校验通过”。CPU/GPU同路径直接范数仍以atol1e-7、rtol1e-6核对；实际零修正后固定/重选图与父Source加权图、原UNION CH1仍以原atol1e-5核对。若真实地图/评分不兼容会停止，不能靠本修复强行复用父指标。三个候选公式和强度保持不变。
+
 可用 `--feature-manifest` 指定现有封存完整特征导出。`--nn-provider` 支持本工具NN bundle的只读导出，格式如下（通过共享st.sealed_json封存）：
 
 ```python
@@ -62,9 +64,9 @@ bundle中有 `positions`、`distance7/index7` 等四层字段及metadata.contrac
 
 最终本地预检及缺失清单位于：
 
-`DINOv3/outputs/mad_equal/aebad_shared_residual_preflight_20261102_v4/`
+`DINOv3/outputs/mad_equal/aebad_shared_residual_preflight_20261102_v5/`
 
-该目录包括preflight、asset_inventory、missing_inputs、necessary_repetition、local_archive_inventory、server_confirmation和time_estimate。v4仅将cuda:0记为计划后端，用于验证元数据预检无需导入Torch或初始化CUDA；没有运行CUDA。原4份相关review包只盘点归档目录，没有重复解压大包。报告在≠向量在。
+该目录包括preflight、asset_inventory、missing_inputs、necessary_repetition、local_archive_inventory、server_confirmation和time_estimate。v5仅将cuda:0记为计划后端，用于验证元数据预检无需导入Torch或初始化CUDA；没有运行CUDA。原4份相关review包只盘点归档目录，没有重复解压大包。报告在≠向量在。
 
 本地已确认：共同名单、seed42原分数/指标/GT身份、Source MAD/权重、小metadata，以及AeBAD.zip中的GT路径。当前指定供应路径缺902份完整query、24份完整支持特征、1份Source向量库、902份9来源NN及902份原标量预测bundle。服务器实体是否在不能靠本地报告断定，需用户手动运行preflight确认，不要求取回权重或Source大库到本地。
 

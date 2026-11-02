@@ -63,13 +63,15 @@ def translated_gpu(q,banks,indices,distances,search,keys,chunk):
         ids=torch.tensor(indices,device=qt.device,dtype=torch.int64)
         ds=torch.tensor(distances,device=qt.device,dtype=torch.float32)
         win=ds.argmin(0);ru=torch.empty_like(qt);means=[];rnorm=[]
+        zero_min=torch.full((n,),torch.inf,device=qt.device)
         def residual(s):
             bank=search.reference(banks[s],keys[s]);r=torch.empty_like(qt)
             for start in range(0,n,chunk):
                 end=min(n,start+chunk);r[start:end]=qt[start:end]-bank[ids[s,start:end]]
             return r
         for s in range(len(banks)):
-            r=residual(s);means.append(r.mean(0));rnorm.append(torch.linalg.vector_norm(r,dim=1).mean())
+            r=residual(s);means.append(r.mean(0));length=torch.linalg.vector_norm(r,dim=1);rnorm.append(length.mean())
+            zero_min=torch.minimum(zero_min,length/1280)
             keep=win==s;ru[keep]=r[keep]
         means=torch.stack(means);delta=ru.mean(0)
         values={A:torch.linalg.vector_norm(ru-delta,dim=1)/1280,
@@ -85,6 +87,7 @@ def translated_gpu(q,banks,indices,distances,search,keys,chunk):
         un=float(torch.linalg.vector_norm(ru,dim=1).mean().cpu());du=float(torch.linalg.vector_norm(delta).cpu())
         result={b:v.cpu().numpy() for b,v in values.items()}
         saved=dict(delta_U=delta.cpu().numpy(),delta_ref=means.cpu().numpy(),union_source=win.cpu().numpy().astype(np.int8),
+                   zero_fixed=(torch.linalg.vector_norm(ru,dim=1)/1280).cpu().numpy(),zero_reselect=zero_min.cpu().numpy(),
                    selected_B=winners[B].cpu().numpy().astype(np.int8),selected_C=winners[C].cpu().numpy().astype(np.int8))
     if any(not np.isfinite(v).all() for v in result.values()) or np.any(result[B]>result[A]+np.float32(1e-7)):raise ValueError('invalid stock FP32 translation')
     old=distances.min(0)
