@@ -969,3 +969,28 @@ DINOv3/tests/test_aebad_s_joint_reference_response.py
 ```
 
 不含validation_results.json、torch_cpu_validation.json、测试日志、本地preflight、outputs、server_results、数据、权重、正常参照数组、分路距离、预测地图或scratch。verify_stock_cpu.py是可重复的CPU张量核验入口，默认不会执行。真实GPU与全域实验未运行。
+
+
+## 固定查询图内共享残差平移（2026-11-02）
+
+独立实现、CPU测试及工作站分阶段说明；历史实验定义、结果和报告不改。
+
+```text
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/__init__.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/protocol.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/numerics.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/inputs.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/runtime.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/prediction.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/evaluation.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/reporting.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/smoke.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/runner.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/verify_stock_cpu.py
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/README.md
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_shared_residual_translation_p0/scripts/run_workstation.sh
+DINOv3/tests/test_aebad_s_shared_residual_translation.py
+```
+
+不含validation_results.json、torch_cpu_validation.json、CPU测试日志、本地preflight、downloads、outputs、server_results、数据、权重、完整特征、memory、NN数组、预测或scratch。原始数组和可靠NN按真实依赖复用；派生预测及smoke绑定计算后端，旧未绑定运行拒绝静默迁移。128项CPU测试通过，真实GPU和全域效果尚待执行。
