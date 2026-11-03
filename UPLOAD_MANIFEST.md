@@ -1014,3 +1014,25 @@ DINOv3/tests/test_aebad_s_conditional_image_score.py
 ```
 
 仅固定实验实现、测试及运行说明，含报告六设置计数P2修复。排除file_manifest.json、validation_results.json、测试日志、预检和本地结果、数据、权重、Source/Target特征及所有缓存。35项模块CPU测试通过；未进行真实GPU或正式实验。
+
+
+## 面积容量约束的反向覆盖（2026-11-03）
+
+```text
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/__init__.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/inputs.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/numerics.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/pipeline.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/protocol.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/regions.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/reporting.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/runner.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/runtime.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/transport.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/README.md
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/scripts/run_workstation.sh
+DINOv3/tests/test_aebad_s_reverse_capacity_coverage.py
+```
+
+仅实现、CPU测试和运行说明，包含两项P2修复；排除file_manifest.json、validation_results.json、测试日志、预检、downloads、server_results、outputs、数据、权重和一切大数组/缓存。新方法只评价图像；复用1804条原P与396条Source66-K8校准P，17600项稀疏minimax LP，没有新增像素/AUPRO或Source构库。真实全规模与GPU部分尚待用户在当前服务器手动smoke。

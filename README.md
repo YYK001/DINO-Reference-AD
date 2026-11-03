@@ -223,3 +223,10 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 [固定公式、资产与手动运行入口](DINOv3/MADEqual/aebad_s_conditional_image_score_p0/README.md)及[实现审计/检查清单](DINOv3/MADEqual/aebad_s_conditional_image_score_p0/implementation_audit.md)。固定三域共同902图、两组K8，共1804个图像×支持组实例；Source66在当前K8下与支持整图K7留一各自生成原SEGMENT的B/P，Source非负斜率与固定正则Target混合斜率只拟合正常输入。三分支仅改变图像评分，定位三指标继承原同组Source加权地图，不新增像素/AUPRO或恢复共享残差候选。
 
 复用原Exact、SEGMENT、CH1及特征身份接口，缺项仅显式补算，Source不重建；默认无Torch预检、逐图小表续跑、单GPU/最多8 CPU、真实资产smoke及12h边界，无容量准入、自动安装或关机。35项模块CPU测试及相关依赖回归通过，包含AUROC/AP六设置报告计数修复；真实缓存/CUDA/效果尚未验证。数据、缓存、测试日志与预检结果不上传。
+
+
+## 面积容量约束的反向覆盖
+
+[固定协议、自动资产盘点、真实smoke与工作站入口](DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/README.md)及[实现审计与完整检查说明](DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/implementation_audit.md)。固定三域、两组K8、902张共同图/1804个图像×支持实例。455张未增强Source完整特征RMS、每图256个物理连通区域、面积容量约束的最差区域平均代价稀疏LP，保留无容量FREE共享/自身尺度融合及两条辅助覆盖分数。原SEGMENT CH1和同组UNION_SOURCE_WEIGHT定位保持，新像素/AUPRO、训练及Source构库均为0。
+
+自动核查当前迁移服务器的已知资产及观察来源，P齐全时不重复Source检索或SEGMENT；缺失完整Q仅显式补提并流式生成区域。默认不导入Torch的preflight，真实16项256×256 LP smoke后外推，单GPU/最多8 CPU槽位，超过12h等待明确授权。无自定义Triton、容量准入、自动安装或关机。修复六设置计数混入域均值及原特征不可访问时的区域续跑问题；30项本地CPU测试通过，真实大网格/LP吞吐、CUDA和Linux多进程待测速。数据、缓存、权重、结果和本地验证日志不上传。
