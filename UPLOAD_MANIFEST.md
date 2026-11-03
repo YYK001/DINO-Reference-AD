@@ -1036,3 +1036,12 @@ DINOv3/tests/test_aebad_s_reverse_capacity_coverage.py
 ```
 
 仅实现、CPU测试和运行说明，包含两项P2修复；排除file_manifest.json、validation_results.json、测试日志、预检、downloads、server_results、outputs、数据、权重和一切大数组/缓存。新方法只评价图像；复用1804条原P与396条Source66-K8校准P，17600项稀疏minimax LP，没有新增像素/AUPRO或Source构库。真实全规模与GPU部分尚待用户在当前服务器手动smoke。
+
+### 可选FP32 GPU LP精度试验
+
+```text
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/gpu_lp.py
+DINOv3/tests/test_aebad_s_reverse_capacity_gpu_lp.py
+```
+
+同步更新模块README/implementation_audit及仓库说明。仅新增手动预检、16题只读导出和原容差GPU对照；采用官方cuOpt PDLP FP32，不改变正式数学定义，不自动安装或启用GPU。43项CPU测试通过，实际GPU尚未运行；原运行、缓存、距离导出、CPU参考解及gpu_lp_validation.json不上传。

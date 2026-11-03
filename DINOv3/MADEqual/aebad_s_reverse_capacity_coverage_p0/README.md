@@ -125,3 +125,57 @@ Ctrl+C退出tail不停止tmux。中断后保留相同RUN_ROOT/CACHE_ROOT、同�
 ```
 
 只使用小型CPU夹具和已完成的本地小表。真实256×256全规模LP吞吐、真实118×118分区吞吐、GPU直接距离/缺失前向、Linux多进程及完整实验仍待服务器smoke。本轮没有执行它们。
+
+## FP32 GPU LP：先验证精度，不自动恢复全量实验
+
+用户服务器的原smoke已保存16个CPU解，外推约60.5小时并暂停。新增同模块的 `gpu_lp` 手动入口，仅用这16题检验现成NVIDIA cuOpt PDLP的FP32模式。正式 `runner`、CONFIG、HiGHS求解器、评分和12小时约定保持不变；没有自定义Triton。此入口不调用旧运行的freeze，不重写旧inputs、smoke、RMS、区域、pair或预测。
+
+NVIDIA说明：`pdlp_precision=0` 在内部使用FP32，输入和输出接口为FP64。本入口保留原始面积和距离系数，回传后按原系数用FP64复核；这部分小规模检查不能改为先量化面积。设置强制PDLP、Stable3、单GPU、关闭crossover，避免默认并发模式用CPU/FP64解代替FP32结果。详见[官方精度设置](https://docs.nvidia.com/cuopt/user-guide/latest/convex-settings.html)。
+
+每个问题分别核对原有行和1e-7、每列相对容量1e-6、W≥−1e-10、目标一致性及FREE下界1e-7尺度；另外与已封存CPU最优值比较，容差为1e-7×max(1,abs(reference))。不要求多解LP的W逐元素一致。求解器必须实际报告PDLP和Optimal；超时即使返回可行解也单列为未通过。内部停止设置保留primal 1e-10、dual/gap 1e-9，不使用cuOpt默认1e-4。两种算法的内部残差范数不同，不能仅因停止参数数字相同就声称精度等价，以上逐问题复核才是验收依据。纯FP32可能无法达到这些标准，届时保留失败，不放宽容差、不自动改混合精度或回退CPU。
+
+默认8题组成块对角LP，以各独立t之和为目标；约束没有跨题连接，仍逐题验收。预热1批，正式2遍×16题。单批30秒求解上限，总计20分钟软上限（在批次之间判断，cuOpt自身可能略超时）。这只是有界测速，不是自动参数搜索。完成批次可按相同配置续用，吞吐引用原批次耗时，不把缓存读取速度当成求解速度。
+
+手动步骤，代码同步后由用户在服务器执行。新环境只为求解器使用，不修改base或原yyk。下面安装是用户手动动作，本地实现过程没有执行安装。
+
+```bash
+source /home/ubun/miniconda3/etc/profile.d/conda.sh
+conda create -p /home/ubun/YYK/conda_envs/yyk_lp python=3.12 pip -y
+/home/ubun/YYK/conda_envs/yyk_lp/bin/python -m pip install \
+  --extra-index-url https://pypi.nvidia.com \
+  'cuopt-cu13==26.10.0' numpy scipy Pillow
+```
+
+先在原yyk中导出原16题（从10张已封存区域重建小距离矩阵，不读原特征、不重分区、不重新跑CPU LP）。GPU距离也只使用物理GPU1。默认阶段仅核查小记录，无Torch/cuOpt导入。
+
+```bash
+cd /home/ubun/YYK/DINO-Reference-AD
+parent=$(cat /home/ubun/YYK/runs/latest_reverse_capacity_run.txt)
+trial="${parent}_gpu_lp_fp32"
+module=DINOv3.MADEqual.aebad_s_reverse_capacity_coverage_p0.gpu_lp
+py=/home/ubun/YYK/conda_envs/yyk/bin/python
+
+"$py" -B -u -m "$module" preflight --parent-run "$parent" --output-root "$trial"
+CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  "$py" -B -u -m "$module" export --parent-run "$parent" --output-root "$trial"
+```
+
+再用隔离环境仅运行GPU LP，单卡、最多8个CPU线程。可直接前台短测；不要由此启动原 `all`。
+
+```bash
+CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=8 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  /home/ubun/YYK/conda_envs/yyk_lp/bin/python -B -u -m "$module" benchmark \
+  --output-root "$trial" --cpu-workers 8 --batch-size 8 --repeats 2 \
+  --time-limit 30 --max-seconds 1200
+cat "$trial/GPU_LP_summary.json"
+```
+
+输出为 `GPU_LP_checks.csv`、`GPU_LP_summary.json`、逐批小记录和约4MiB的16题距离/面积。仅全部32次检查通过，才给LP部分的待办耗时外推；不把未测的补特征、分区或最终评价当0，也不承诺全轮12小时内完成。导出距离未在旧pair中保存，不能声称有旧距离矩阵逐元素比对；复用原区域、原RMS、同实现/环境/后端重建，并核对原FREE和CPU目标。只覆盖background/seed42两张图，跨域数值与吞吐仍未验证。
+
+检查仅包括原小记录封存与来源/环境一致、独立输出路径、单卡配置、稀疏LP和原数值容差；不扫描完整特征SHA，不新增RAM/显存/磁盘容量门槛。添加测速文件会改变正式入口的代码身份，旧输出不能直接用新版 `runner all` 续跑；本测速明确只读接入旧输出，正式后端接入及新运行复用方案待精度/速度结果review后确定。
+
+新增CPU回归命令：
+
+```powershell
+& 'D:\anaconda\miniconda\envs\chinamoblie\python.exe' -B -m unittest DINOv3.tests.test_aebad_s_reverse_capacity_gpu_lp DINOv3.tests.test_aebad_s_reverse_capacity_coverage -v
+```
