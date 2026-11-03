@@ -77,6 +77,12 @@ class NumericalTests(unittest.TestCase):
         self.assertEqual(s['absolute_dual_tolerance'],1e-9)
         self.assertEqual(s['relative_gap_tolerance'],1e-9)
 
+    def test_mixed_changes_only_the_requested_precision_setting(self):
+        single=g.settings_values(30,8,'fp32');mixed=g.settings_values(30,8,'mixed')
+        self.assertEqual(mixed['pdlp_precision'],2)
+        self.assertEqual({k:(single[k],mixed[k]) for k in single if single[k]!=mixed[k]},dict(pdlp_precision=(0,2)))
+        with self.assertRaises(ValueError):g.settings_values(30,8,'automatic')
+
     def test_stock_api_adapter_sends_original_fp64_coefficients(self):
         class Method(IntEnum):PDLP=1
         class Mode(IntEnum):Stable3=4
@@ -99,13 +105,17 @@ class NumericalTests(unittest.TestCase):
             'cuopt.linear_programming.solver_settings.solver_settings':SimpleNamespace(SolverMethod=Method,PDLPSolverMode=Mode),
             'cuopt.linear_programming.solver':SimpleNamespace(solver_parameters=keys)}
         with patch.dict(sys.modules,modules):
-            adapter=g.CuOptFP32();r=adapter.solve(batch)
+            adapter=g.CuOptPDLP();r=adapter.solve(batch)
+            mixed=g.CuOptPDLP(30,8,'mixed');other=mixed.solve(batch)
         self.assertTrue(g.check_solution([p],batch,r)[0]['passed'])
+        self.assertTrue(g.check_solution([p],batch,other)[0]['passed'])
         np.testing.assert_array_equal(models[0].set_csr_constraint_matrix_args[0],batch['matrix'].data)
         self.assertEqual(models[0].set_csr_constraint_matrix_args[0].dtype,np.float64)
         self.assertEqual(models[0].set_csr_constraint_matrix_args[1].dtype,np.int32)
         self.assertEqual(adapter.settings.values['pdlp_precision'],0)
         self.assertEqual(adapter.settings.values['method'],Method.PDLP)
+        self.assertEqual(mixed.settings.values['pdlp_precision'],2)
+        np.testing.assert_array_equal(models[0].set_csr_constraint_matrix_args[0],models[1].set_csr_constraint_matrix_args[0])
 
 
 class TrialTests(unittest.TestCase):
@@ -149,11 +159,38 @@ class TrialTests(unittest.TestCase):
         p,_=problem();ps=[dict(p,id=f'{i:02d}') for i in range(16)]
         with tempfile.TemporaryDirectory() as tmp,patch.object(g,'load_problems',return_value=(dict(seal='fixture',original_estimate={}),ps)):
             a=SimpleNamespace(output_root=Path(tmp),time_limit=30.,cpu_workers=8,batch_size=8,repeats=2,max_seconds=1200.)
-            with patch.object(g,'CuOptFP32') as backend:
+            with patch.object(g,'CuOptPDLP') as backend:
                 backend.side_effect=ImportError('fixture absent cuOpt')
                 r=g.trial(a,backend)
             self.assertFalse(r['passed']);self.assertEqual(r['status'],'GPU_backend_unavailable')
             self.assertFalse((Path(tmp)/'trial_results').exists())
+
+    def test_mixed_trial_is_explicit_and_cannot_relabel_old_results(self):
+        p,_=problem();ps=[dict(p,id=f'{i:02d}') for i in range(16)];seen=[]
+        class FakeBackend:
+            def __init__(self,time_limit,cpu_workers,precision):seen.append(precision)
+            def solve(self,batch):return cpu_fixture(batch)
+        with tempfile.TemporaryDirectory() as tmp,patch.object(g,'load_problems',return_value=(dict(seal='fixture',original_estimate={}),ps)):
+            a=SimpleNamespace(output_root=Path(tmp),time_limit=30.,cpu_workers=8,batch_size=8,repeats=1,max_seconds=300.,precision='fp32')
+            g.trial(a,FakeBackend)
+            snapshot={f:f.read_bytes() for f in Path(tmp).rglob('*.json')}
+            a.precision='mixed'
+            with self.assertRaises(ValueError):g.trial(a,FakeBackend)
+            self.assertEqual(seen,['fp32']);self.assertEqual(snapshot,{f:f.read_bytes() for f in snapshot})
+            a.output_root=Path(tmp)/'new_mixed'
+            result=g.trial(a,FakeBackend)
+            self.assertEqual(result['status'],'MIXED_precision_trial_passed');self.assertEqual(result['precision'],'mixed')
+            self.assertEqual(result['numerical_checks_passed'],16);self.assertLess(result['max_errors']['reference_abs_error'],1e-7)
+            self.assertEqual(seen,['fp32','mixed'])
+            self.assertEqual(g.st.sealed_json(a.output_root/'trial_inputs.json')['settings']['pdlp_precision'],2)
+            self.assertEqual(snapshot,{f:f.read_bytes() for f in snapshot})
+
+    def test_explicit_problem_provider_must_be_read_only_and_disjoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for out in (root,root/'inside',root.parent):
+                with self.assertRaises(ValueError):
+                    g.main(['benchmark','--precision','mixed','--problem-root',str(root),'--output-root',str(out)])
 
     def test_export_uses_only_cached_regions_and_resume_does_not_recompute(self):
         def image(name):return dict(relative_path=name,image_sha256=name,image_height=256,image_width=256)
@@ -185,6 +222,11 @@ class TrialTests(unittest.TestCase):
                 distance.reset_mock() # Release mmap views retained only by the test spy on Windows.
             manifest,ps=g.load_problems(a);self.assertEqual(len(ps),16)
             self.assertFalse(manifest['LP_reference_recomputed'])
+            del ps
+            a.problem_root=out;a.output_root=root/'separate_mixed'
+            other,ps=g.load_problems(a)
+            self.assertEqual(manifest,other);self.assertEqual(len(ps),16)
+            self.assertFalse(a.output_root.exists())
             del ps
             self.assertEqual(snapshot,{p:p.read_bytes() for p in snapshot})
             self.assertEqual(inputs,g.st.sealed_json(parent/'inputs.json'))

@@ -179,3 +179,27 @@ cat "$trial/GPU_LP_summary.json"
 ```powershell
 & 'D:\anaconda\miniconda\envs\chinamoblie\python.exe' -B -m unittest DINOv3.tests.test_aebad_s_reverse_capacity_gpu_lp DINOv3.tests.test_aebad_s_reverse_capacity_coverage -v
 ```
+
+### 后续固定混合精度对照
+
+显式增加 `--precision mixed`，对应cuOpt `pdlp_precision=2`。矩阵/转置的SpMV存储使用FP32，向量、计算类型及收敛检查使用FP64；这不是纯FP32，也不保证比纯FP32更快。默认仍为 `--precision fp32`，不会自动尝试其他模式。除精度参数外，两种模式传给cuOpt的设置、原始系数、变量边界、LP及验收容差完全相同。
+
+上次已导出的16题可通过 `--problem-root` 只读引用，不重新导出距离、RMS或区域。混合模式结果使用独立 `--output-root`，不能覆盖FP32的失败记录；同一结果目录切换精度时拒绝混用。原 `yyk_lp` 已装好时，无需安装/升级任何依赖。
+
+代码同步后，仅运行下面这一项固定对照，仍为物理GPU1、最多8 CPU线程、预热1批和正式16题、单批30秒时限：
+
+```bash
+cd /home/ubun/YYK/DINO-Reference-AD
+parent=$(cat /home/ubun/YYK/runs/latest_reverse_capacity_run.txt)
+module=DINOv3.MADEqual.aebad_s_reverse_capacity_coverage_p0.gpu_lp
+trial="${parent}_gpu_lp_mixed"
+
+CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=8 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  /home/ubun/YYK/conda_envs/yyk_lp/bin/python -B -u -m "$module" benchmark \
+  --problem-root "${parent}_gpu_lp_fp32" --output-root "$trial" \
+  --precision mixed --batch-size 8 --repeats 1 --cpu-workers 8 \
+  --time-limit 30 --max-seconds 300
+cat "$trial/GPU_LP_summary.json"
+```
+
+汇总现在直接列出精度、纯数值检查通过数、行和/相对容量/目标一致性/CPU参考目标差的最大误差，区分数值通过与Optimal状态。仅全部验收通过才给LP吞吐；失败仍不外推全量。新增检查只有“只读问题目录与新输出隔离、精度绑定”，无大数组重复SHA或机器容量门槛。46项本地CPU测试通过；混合模式的实际GPU结果待用户执行，不属于已验证精度/性能。

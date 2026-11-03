@@ -1045,3 +1045,5 @@ DINOv3/tests/test_aebad_s_reverse_capacity_gpu_lp.py
 ```
 
 同步更新模块README/implementation_audit及仓库说明。仅新增手动预检、16题只读导出和原容差GPU对照；采用官方cuOpt PDLP FP32，不改变正式数学定义，不自动安装或启用GPU。43项CPU测试通过，实际GPU尚未运行；原运行、缓存、距离导出、CPU参考解及gpu_lp_validation.json不上传。
+
+同一入口继续支持显式mixed模式及只读problem-root复用，更新原测试与说明；46项本地CPU测试通过。只改变求解精度选项，原数学定义和容差不变，不带入用户服务器测试结果、缓存或本地验证JSON。

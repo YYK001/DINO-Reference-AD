@@ -1,4 +1,4 @@
-"""Explicit FP32 cuOpt trial on the 16 committed CPU-smoke LPs, never a formal run.
+"""Explicit cuOpt precision trial on the 16 committed CPU-smoke LPs, never a formal run.
 
 Export runs in the original yyk environment; benchmark runs in an isolated cuOpt
 environment. No model, raw features, labels or new Source RMS are needed.
@@ -18,8 +18,9 @@ st=ip.st
 SCHEMA='reverse_capacity_GPU_precision_trial_v1'
 
 
-def settings_values(time_limit,cpu_workers):
-    return dict(method='PDLP',pdlp_precision=0,pdlp_solver_mode='Stable3',num_gpus=1,crossover=False,
+def settings_values(time_limit,cpu_workers,precision='fp32'):
+    if precision not in ('fp32','mixed'):raise ValueError('explicit fp32 or mixed precision required')
+    return dict(method='PDLP',pdlp_precision={'fp32':0,'mixed':2}[precision],pdlp_solver_mode='Stable3',num_gpus=1,crossover=False,
         num_cpu_threads=cpu_workers,time_limit=time_limit,
         absolute_primal_tolerance=CONFIG['solver_primal_tolerance'],relative_primal_tolerance=CONFIG['solver_primal_tolerance'],
         absolute_dual_tolerance=CONFIG['solver_dual_tolerance'],relative_dual_tolerance=CONFIG['solver_dual_tolerance'],
@@ -38,16 +39,16 @@ def sparse_batch(problems):
         senses=np.array(senses),objective=np.concatenate(objectives),slices=slices)
 
 
-class CuOptFP32:
-    """Stock sparse cuOpt API. FP32 internal PDLP, no implicit crossover/fallback."""
-    def __init__(self,time_limit=30.,cpu_workers=8):
-        # cuOpt's official DataModel accepts FP64 coefficients. pdlp_precision=0
-        # explicitly converts the iterative solve to FP32; output/checks use FP64.
+class CuOptPDLP:
+    """Stock sparse cuOpt API. Explicit precision, no implicit crossover/fallback."""
+    def __init__(self,time_limit=30.,cpu_workers=8,precision='fp32'):
+        # Official mode 0 uses FP32 iterations; mode 2 uses FP32 SpMV matrices
+        # with FP64 vectors and convergence checks. Original inputs stay FP64.
         from cuopt import linear_programming as lp
         from cuopt.linear_programming.solver_settings.solver_settings import SolverMethod,PDLPSolverMode
         from cuopt.linear_programming.solver import solver_parameters as keys
         self.lp=lp;self.method=SolverMethod.PDLP;self.settings=lp.SolverSettings()
-        self.parameters=settings_values(time_limit,cpu_workers)
+        self.parameters=settings_values(time_limit,cpu_workers,precision)
         for name,value in self.parameters.items():
             value=self.method if name=='method' else PDLPSolverMode.Stable3 if name=='pdlp_solver_mode' else value
             self.settings.set_parameter(getattr(keys,'CUOPT_'+name.upper()),value)
@@ -55,7 +56,7 @@ class CuOptFP32:
     def solve(self,batch):
         tick=time.perf_counter();model=self.lp.DataModel();matrix=batch['matrix']
         # Preserve original coefficients/area masses; do NOT quantize the input
-        # problem to disguise FP32 residuals. Only the PDLP iterations use FP32.
+        # problem to disguise residuals. cuOpt handles the requested internal precision.
         model.set_csr_constraint_matrix(matrix.data.astype(np.float64,copy=False),
             matrix.indices.astype(np.int32,copy=False),matrix.indptr.astype(np.int32,copy=False))
         model.set_constraint_bounds(batch['rhs']);model.set_row_types(batch['senses'])
@@ -166,10 +167,11 @@ def export(a):
 
 
 def load_problems(a):
-    manifest=st.sealed_json(a.output_root/'problems.json');out=[]
+    root=getattr(a,'problem_root',None) or a.output_root
+    manifest=st.sealed_json(root/'problems.json');out=[]
     if manifest['schema']!=SCHEMA or manifest['protocol']!=CONFIG:raise ValueError('benchmark input protocol differs')
     for ref in manifest['problems']:
-        x,r=st.get(a.output_root/'problems'/ref['id'])
+        x,r=st.get(root/'problems'/ref['id'])
         if r['seal']!=ref['seal'] or r['metadata']['reference_objective']!=ref['reference_objective']:raise ValueError('exported LP commitment changed')
         transport.validate_inputs(x['distance'],x['a'],x['b'])
         if x['distance'].shape!=(256,256) or x['distance'].dtype!=np.float32:raise ValueError('real full-size FP32 distances required')
@@ -178,18 +180,20 @@ def load_problems(a):
     return manifest,out
 
 
-def trial(a,backend_factory=CuOptFP32):
+def trial(a,backend_factory=CuOptPDLP):
     manifest,problems=load_problems(a)
-    binding=dict(schema=SCHEMA,problems=manifest['seal'],settings=settings_values(a.time_limit,a.cpu_workers),
-        batch_size=a.batch_size,repeats=a.repeats,precision='PDLP_FP32_internal_original_FP64_inputs_and_checks',
+    precision=getattr(a,'precision','fp32');tag=precision.upper()
+    binding=dict(schema=SCHEMA,problems=manifest['seal'],settings=settings_values(a.time_limit,a.cpu_workers,precision),
+        batch_size=a.batch_size,repeats=a.repeats,precision=precision,
+        problem_root=str(getattr(a,'problem_root',None) or a.output_root),
         packages=packages(),visible_device=os.environ.get('CUDA_VISIBLE_DEVICES'),
         implementation=st.sha(Path(__file__)),checking_implementation=st.sha(Path(transport.__file__)))
     identity=st.sealed_json(a.output_root/'trial_inputs.json',binding)['seal']
     tick=time.perf_counter()
-    try:backend=backend_factory(a.time_limit,a.cpu_workers)
+    try:backend=backend_factory(a.time_limit,a.cpu_workers,precision)
     except Exception as e:
         summary=dict(status='GPU_backend_unavailable',identity=identity,complete=False,passed=False,
-            error=f'{type(e).__name__}: {e}',formal_backend_changed=False,effective_seconds_per_LP=None)
+            precision=precision,error=f'{type(e).__name__}: {e}',formal_backend_changed=False,effective_seconds_per_LP=None)
         st.write_json(a.output_root/'GPU_LP_summary.json',summary)
         return summary
     init=time.perf_counter()-tick
@@ -211,15 +215,22 @@ def trial(a,backend_factory=CuOptFP32):
                 except Exception as e:value=dict(checks=[],solver=None,error=f'{type(e).__name__}: {e}')
                 record=st.sealed_json(path,dict(identity=identity,repeat=repeat,batch=j,problem_ids=[p['id'] for p in group],
                     end_to_end_seconds=time.perf_counter()-begin,**value))
-            results.append(record);print(f'[GPU LP FP32] repeat={repeat} batch={j} passed={sum(r["passed"] for r in record["checks"])}/{len(group)} seconds={record["end_to_end_seconds"]:.3f}',flush=True)
+            results.append(record);print(f'[GPU LP {tag}] repeat={repeat} batch={j} passed={sum(r["passed"] for r in record["checks"])}/{len(group)} seconds={record["end_to_end_seconds"]:.3f}',flush=True)
         if time.perf_counter()-started>a.max_seconds:break
     measured=[r for r in results if r['repeat']>=0];checks=[c for r in measured for c in r['checks']]
     complete=len(measured)==len(groups)*a.repeats and len(checks)==16*a.repeats
     passed=complete and all(c['passed'] for c in checks)
     seconds=sum(r['end_to_end_seconds'] for r in measured);rate=seconds/len(checks) if passed else None
     remaining=manifest['original_estimate'].get('remaining_LP_pairs')
-    summary=dict(status='FP32_precision_trial_passed' if passed else 'FP32_precision_trial_incomplete_or_failed',
-        identity=identity,complete=complete,passed=passed,successful_checks=sum(c['passed'] for c in checks),requested_checks=16*a.repeats,
+    maxima={}
+    for name in ('row_sum_max_error','capacity_max_relative_error','objective_consistency_error','reference_abs_error'):
+        values=[c[name] if name in c else c.get('feasibility',{}).get(name) for c in checks]
+        values=[v for v in values if v is not None]
+        maxima[name]=max(values) if values else None
+    summary=dict(status=f'{tag}_precision_trial_passed' if passed else f'{tag}_precision_trial_incomplete_or_failed',
+        identity=identity,precision=precision,complete=complete,passed=passed,
+        successful_checks=sum(c['passed'] for c in checks),numerical_checks_passed=sum(c.get('numerical_checks_passed',False) for c in checks),
+        requested_checks=16*a.repeats,max_errors=maxima,
         backend_initialization_seconds=init,warmup_seconds=sum(r['end_to_end_seconds'] for r in results if r['repeat']<0),
         measured_seconds=seconds,effective_seconds_per_LP=rate,remaining_LP_seconds=None if rate is None or remaining is None else rate*remaining,
         whole_experiment_hours=None,other_work='Source RMS already retained; feature warm throughput and region preparation must be measured separately',
@@ -250,12 +261,19 @@ def main(argv=None):
     p.add_argument('stage',nargs='?',default='preflight',choices=('preflight','export','benchmark'))
     p.add_argument('--parent-run',type=Path);p.add_argument('--cache-root',type=Path)
     p.add_argument('--output-root',type=Path,required=True)
+    p.add_argument('--problem-root',type=Path,help='read-only existing 16-problem export; benchmark only')
+    p.add_argument('--precision',choices=('fp32','mixed'),default='fp32')
     p.add_argument('--batch-size',type=int,choices=(1,2,4,8,16),default=8)
     p.add_argument('--repeats',type=int,choices=(1,2,3),default=2)
     p.add_argument('--cpu-workers',type=int,choices=range(1,9),default=8)
     p.add_argument('--time-limit',type=float,default=30.)
     p.add_argument('--max-seconds',type=float,default=1200.)
     a=p.parse_args(argv);a.output_root=a.output_root.resolve()
+    if a.problem_root:
+        a.problem_root=a.problem_root.resolve()
+        if a.stage!='benchmark':raise ValueError('--problem-root is only used by benchmark')
+        if a.problem_root==a.output_root or a.problem_root in a.output_root.parents or a.output_root in a.problem_root.parents:
+            raise ValueError('new precision output must be separate from the read-only problem provider')
     if a.stage=='benchmark':
         device=os.environ.get('CUDA_VISIBLE_DEVICES','')
         if not (device.isdigit() or device.startswith('GPU-')) or ',' in device:

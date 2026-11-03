@@ -232,3 +232,5 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 自动核查当前迁移服务器的已知资产及观察来源，P齐全时不重复Source检索或SEGMENT；缺失完整Q仅显式补提并流式生成区域。默认不导入Torch的preflight，真实16项256×256 LP smoke后外推，单GPU/最多8 CPU槽位，超过12h等待明确授权。无自定义Triton、容量准入、自动安装或关机。修复六设置计数混入域均值及原特征不可访问时的区域续跑问题；30项本地CPU测试通过，真实大网格/LP吞吐、CUDA和Linux多进程待测速。数据、缓存、权重、结果和本地验证日志不上传。
 
 新增可选FP32 GPU LP精度对照入口 `aebad_s_reverse_capacity_coverage_p0.gpu_lp`：从已完成smoke的区域及16个CPU参考解导出小问题，在独立cuOpt环境手动测试。使用现成PDLP、单GPU、原容差逐题核对，不自动替换正式求解器或恢复全量实验；不重提特征/重算RMS。43项本地CPU测试通过；真实cuOpt API、FP32收敛与吞吐待服务器验证。环境准备、测速命令和完整检查清单见同模块README与审计。
+
+后续显式 `--precision mixed` 对照仅切换cuOpt官方精度模式，保留原LP及容差。`--problem-root` 可直接只读引用上次导出的16题，新目录保存混合结果，无需重新导出或安装依赖。46项本地CPU测试通过，mixed GPU精度与吞吐待用户测量；不自动启用正式实验。
