@@ -87,6 +87,75 @@ class CertificateTests(unittest.TestCase):
         self.assertAlmostEqual(r['normalized_gap'],abs(r['primal_objective']-r['dual_objective'])/max(1.,abs(r['primal_objective'])+abs(r['dual_objective'])))
 
 
+class MassFlowCoordinateTests(unittest.TestCase):
+    def test_operator_and_rhs_are_positive_diagonal_transforms(self):
+        p,x,y=exact();original=v.gpu.sparse_batch([p]);flow,S,R=v.mass_flow_batch([p])
+        np.testing.assert_allclose(flow['matrix'].toarray(),R[:,None]*original['matrix'].toarray()/S[None,:],rtol=1e-14,atol=1e-14)
+        np.testing.assert_allclose(flow['rhs'],R*original['rhs'],rtol=1e-14,atol=1e-14)
+        np.testing.assert_array_equal(flow['senses'],original['senses'])
+        self.assertEqual(flow['matrix'].shape,original['matrix'].shape)
+        self.assertTrue((S>0).all() and (R>0).all());self.assertEqual(S[-1],1.)
+        np.testing.assert_allclose(flow['matrix']@(S*x),R*(original['matrix']@x),rtol=1e-13,atol=1e-13)
+        self.assertEqual(float(flow['objective']@(S*x)),p['reference_objective'])
+
+    def test_rectangular_and_unbalanced_areas_preserve_original_optimum_and_dual(self):
+        rng=np.random.default_rng(42)
+        for n,m in ((2,3),(4,3),(3,5)):
+            a=np.r_[1e-4,rng.uniform(.1,1,n-1)];a/=a.sum()
+            b=rng.uniform(.1,1,m);b/=b.sum()
+            p,x,y=exact(rng.uniform(.6,.9,(n,m)),a,b)
+            batch,S,R=v.mass_flow_batch([p]);E=batch['senses']=='E';L=~E
+            r=linprog(batch['objective'],A_eq=batch['matrix'][E],b_eq=batch['rhs'][E],
+                A_ub=batch['matrix'][L],b_ub=batch['rhs'][L],bounds=(0,None),method='highs-ds',
+                options=dict(primal_feasibility_tolerance=1e-10,dual_feasibility_tolerance=1e-9))
+            self.assertTrue(r.success,r.message)
+            original_y=R*np.r_[r.eqlin.marginals,r.ineqlin.marginals]
+            check=v.audit(p,r.x/S,original_y,'Optimal')
+            self.assertTrue(check['accepted'],check)
+            self.assertAlmostEqual(r.fun,p['reference_objective'],places=10)
+
+    def test_mapped_dual_is_certified_in_original_coefficients_and_blocks(self):
+        p,x,y=exact();q,xx,yy=exact([[.8,.9,.7],[.9,.7,.8]],[.2,.8],[.2,.3,.5])
+        solver=v.Solver.__new__(v.Solver);batch,S,R=v.mass_flow_batch([p,q])
+        primal=np.r_[x,xx]*S;dual=np.r_[y,yy]/R
+        solver.solve=lambda b:dict(primal=primal,dual=dual,status='TimeLimit',solved_by='PDLP',error_status=0)
+        results,_=solver.solve_certified([p,q],coordinate_system='mass_flow_v1')
+        self.assertTrue(all(r['audit']['accepted'] for r in results))
+        np.testing.assert_allclose(results[0]['primal'],x);np.testing.assert_allclose(results[1]['dual'],yy)
+        np.testing.assert_array_equal(results[0]['solver_primal'],primal[:len(x)])
+        self.assertEqual(results[1]['primal'][-1],xx[-1])
+        with self.assertRaises(ValueError):solver.solve_certified([p],coordinate_system='unrequested')
+
+    def test_missing_dual_and_bad_original_certificate_still_fail(self):
+        p,x,y=exact();batch,S,R=v.mass_flow_batch([p]);solver=v.Solver.__new__(v.Solver)
+        for dual in (np.array([]),np.zeros_like(y)):
+            solver.solve=lambda b:dict(primal=x*S,dual=dual,status='TimeLimit',solved_by='PDLP',error_status=0)
+            results,_=solver.solve_certified([p],coordinate_system='mass_flow_v1')
+            self.assertFalse(results[0]['audit']['accepted'])
+        self.assertEqual(v.PROTOCOL['solver']['time_limit'],30.)
+
+    def test_trial_is_16_only_saves_raw_and_mapped_evidence_without_formal_switch(self):
+        p,x,y=exact();problems=[dict(p,id=f'{i:02d}') for i in range(16)]
+        class FakeSolver:
+            calls=[]
+            def __init__(self,workers):pass
+            def solve_certified(self,group,coordinate_system='original'):
+                FakeSolver.calls.append((len(group),coordinate_system))
+                return [dict(primal=x,dual=y,solver_primal=x,solver_dual=y,audit=v.audit(p,x,y,'TimeLimit')) for _ in group],dict(solver={'status':'TimeLimit'})
+        with tempfile.TemporaryDirectory() as tmp:
+            a=SimpleNamespace(problem_root=Path(tmp)/'old',output_root=Path(tmp)/'new',cpu_workers=7)
+            with patch.object(v.gpu,'load_problems',return_value=(dict(seal='original_inputs'),problems)):
+                r=v.mass_flow_trial(a,FakeSolver)
+            self.assertEqual(r['accepted'],16);self.assertFalse(r['formal_backend_changed'])
+            self.assertEqual(FakeSolver.calls,[(8,'mass_flow_v1'),(8,'mass_flow_v1')])
+            arrays,record=ph.st.get(a.output_root/'proofs/00')
+            self.assertEqual(set(arrays),{'primal','dual','solver_primal','solver_dual'})
+            self.assertEqual(record['metadata']['trial']['actual_settings'],v.settings())
+            for array in arrays.values():array._mmap.close()
+            self.assertFalse((a.output_root/'pairs').exists());self.assertFalse((a.output_root/'predictions_frozen.json').exists())
+            self.assertEqual(len(ip.csv_rows(a.output_root/'LP_checks.csv')),16)
+
+
 class ScopeAndReuseTests(unittest.TestCase):
     def test_plan_and_observations_do_not_expand_settings(self):
         samples=[dict(image(str(i)),sample_id=str(i),label=int(i>=77)) for i in range(289)]

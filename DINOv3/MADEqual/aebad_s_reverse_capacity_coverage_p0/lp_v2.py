@@ -73,17 +73,108 @@ class Solver(gpu.CuOptPDLP):
             if name in ('method','pdlp_solver_mode'):continue
             self.settings.set_parameter(getattr(keys,'CUOPT_'+name.upper()),value)
 
-    def solve_certified(self,problems):
+    def solve_certified(self,problems,coordinate_system='original'):
         # Reuse the exact same DataModel construction and solution extraction;
         # add the dual vector through a small extension in the shared adapter.
-        started=time.perf_counter();batch=gpu.sparse_batch(problems);solution=self.solve(batch)
+        started=time.perf_counter()
+        if coordinate_system=='original':
+            batch=gpu.sparse_batch(problems);variable_scale=row_scale=None
+        elif coordinate_system=='mass_flow_v1':
+            batch,variable_scale,row_scale=mass_flow_batch(problems)
+        else:raise ValueError('unknown LP coordinate system')
+        solution=self.solve(batch)
         output=[];row=0
         dual=solution.get('dual',np.array([]));primal=solution['primal']
         for problem,(start,end) in zip(problems,batch['slices']):
             n,m=problem['distance'].shape;count=2*n+m
-            x=primal[start:end];y=dual[row:row+count];row+=count
+            raw_x=primal[start:end];raw_y=dual[row:row+count]
+            x=raw_x if variable_scale is None or raw_x.shape!=(end-start,) else raw_x/variable_scale[start:end]
+            y=raw_y if row_scale is None or raw_y.shape!=(count,) else raw_y*row_scale[row:row+count]
+            row+=count
             certificate=audit(problem,x,y,solution['status'],solution['solved_by'])
             if solution.get('error_status')!=0:
                 certificate.update(accepted=False,acceptance='incomplete',reason='solver error status missing or nonzero')
-            output.append(dict(primal=x,dual=y,audit=certificate))
+            record=dict(primal=x,dual=y,audit=certificate)
+            if variable_scale is not None:record.update(solver_primal=raw_x,solver_dual=raw_y)
+            output.append(record)
         return output,dict(seconds=time.perf_counter()-started,solver={k:v for k,v in solution.items() if k not in ('primal','dual')})
+
+
+def mass_flow_batch(problems):
+    """Positive diagonal change of coordinates, not a different transport LP.
+
+    k=n, z_ij=k*a_i*W_ij; t is unchanged. Row/capacity/cost rows
+    are multiplied by k*a_i, k, k*a_i, respectively. Thus the
+    recovered original dual is y=R*y_scaled and W=z/(k*a_i).
+    No row is removed, no coefficient is clipped, no plan is repaired.
+    """
+    batch=gpu.sparse_batch(problems);variables=[];rows=[]
+    for problem in problems:
+        d,a,b=transport.validate_inputs(problem['distance'],problem['a'],problem['b']);n,m=d.shape
+        mass=n*a
+        variables.append(np.r_[np.repeat(mass,m),1.])
+        rows.append(np.r_[mass,np.full(m,float(n)),mass])
+    variable_scale=np.concatenate(variables);row_scale=np.concatenate(rows)
+    batch['matrix']=batch['matrix'].multiply(row_scale[:,None]).multiply(1./variable_scale[None,:]).tocsr()
+    batch['rhs']=batch['rhs']*row_scale
+    batch['objective']=batch['objective']/variable_scale
+    return batch,variable_scale,row_scale
+
+
+def mass_flow_trial(a,backend_factory=Solver):
+    """Fixed 16-case diagnostic only; never switches the formal LP backend."""
+    import os
+    from pathlib import Path
+    manifest,problems=gpu.load_problems(a)
+    binding=dict(kind='capacity_mass_flow_trial_v1',coordinate_system='mass_flow_v1',
+        problems=manifest['seal'],problem_root=str(a.problem_root),acceptance_protocol=PROTOCOL,actual_settings=settings(a.cpu_workers),
+        versions=gpu.packages(),visible_device=os.environ.get('CUDA_VISIBLE_DEVICES'),
+        implementation=gpu.st.sha(Path(__file__)),batch_size=8,repeats=1,formal_backend_changed=False)
+    gpu.st.sealed_json(a.output_root/'trial_inputs.json',binding)
+    started=time.perf_counter();solver=backend_factory(a.cpu_workers);checks=[];batch_seconds=[]
+    for start in (0,8):
+        tick=time.perf_counter();group=problems[start:start+8]
+        results,timing=solver.solve_certified(group,coordinate_system='mass_flow_v1')
+        if len(results)!=len(group):raise ValueError('missing diagnostic LP solutions')
+        for problem,result in zip(group,results):
+            check=dict(id=problem['id'],**result['audit']);checks.append(check)
+            gpu.st.put(a.output_root/'proofs'/problem['id'],
+                {k:result[k] for k in ('primal','dual','solver_primal','solver_dual')},
+                gpu.finite_record(dict(trial=binding,original_input_id=problem['id'],
+                    audit=check,solver=timing['solver'],coordinate_mapping='x_original=S^-1*x_solver; y_original=R*y_solver')))
+            print('[mass-flow original-coefficient audit]',problem['id'],
+                {k:check.get(k) for k in ('accepted','stop_reason','reference_abs_error',
+                    'dual_reduced_cost_violation','normalized_gap')},flush=True)
+        elapsed=time.perf_counter()-tick;batch_seconds.append(elapsed)
+        gpu.st.sealed_json(a.output_root/f'batch{start//8}.json',gpu.finite_record(
+            dict(seconds=elapsed,solver=timing['solver'],checks=[dict(id=p['id'],**r['audit']) for p,r in zip(group,results)])))
+    accepted=sum(r['accepted'] for r in checks)
+    summary=dict(status='mass_flow_trial_passed' if accepted==16 else 'mass_flow_trial_pending',
+        accepted=accepted,required=16,seconds=time.perf_counter()-started,batch_end_to_end_seconds=batch_seconds,
+        formal_backend_changed=False,feature_forwards=0,CPU_reference_recomputed=False,
+        maximum_errors={k:max((r[k] for r in checks if r.get(k) is not None),default=None) for k in
+            ('row_sum_max_error','capacity_max_relative_error','objective_consistency_error',
+             'reference_abs_error','dual_reduced_cost_violation','dual_inequality_sign_violation','normalized_gap')})
+    gpu.st.write_csv(a.output_root/'LP_checks.csv',gpu.finite_record(checks))
+    gpu.st.write_json(a.output_root/'summary.json',gpu.finite_record(summary))
+    return summary
+
+
+def main(argv=None):
+    import argparse,json,os
+    from pathlib import Path
+    p=argparse.ArgumentParser(description='Fixed mixed-PDLP mass-flow coordinate trial on the existing 16 LPs only')
+    p.add_argument('--problem-root',type=Path,required=True)
+    p.add_argument('--output-root',type=Path,required=True)
+    p.add_argument('--cpu-workers',type=int,choices=range(1,8),default=7)
+    a=p.parse_args(argv);a.problem_root=a.problem_root.resolve();a.output_root=a.output_root.resolve()
+    if a.problem_root==a.output_root or a.problem_root in a.output_root.parents or a.output_root in a.problem_root.parents:
+        raise ValueError('diagnostic output overlaps the read-only input export')
+    if a.output_root.exists():raise ValueError('select a new diagnostic output; previous trials are read-only')
+    device=os.environ.get('CUDA_VISIBLE_DEVICES','')
+    if not (device.isdigit() or device.startswith('GPU-')) or ',' in device:raise ValueError('one explicitly selected physical GPU required')
+    result=mass_flow_trial(a);print(json.dumps(result,ensure_ascii=False,indent=2),flush=True)
+    return 0 if result['accepted']==16 else 2
+
+
+if __name__=='__main__':raise SystemExit(main())

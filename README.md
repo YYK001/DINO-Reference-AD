@@ -236,3 +236,5 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 后续显式 `--precision mixed` 对照仅切换cuOpt官方精度模式，保留原LP及容差。`--problem-root` 可直接只读引用上次导出的16题，新目录保存混合结果，无需重新导出或安装依赖。46项本地CPU测试通过，mixed GPU精度与吞吐待用户测量；不自动启用正式实验。
 
 当前工作站默认 `mixed_background_v2`：仅background/seed42共同289图、Source66、固定K8，共2840 LP，六分支图像AUROC/AP。新LP协议采用1e-5原始/对偶/间隙验收；逐LP保存原解及对偶，满足全部要求的TimeLimit明确记近似解。先复核原16题与真实成本，超过12h等待同意；复用旧RMS/区域/距离/合法严格CPU结果，独立yyk_lp常驻求解进程。默认preflight，显式tmux启动入口与完整检查说明见模块README。实际新版GPU复核和正式指标尚待服务器执行。
+
+原坐标mixed未通过实际对偶验收，正式阶段保持pending。新增同模块`lp_v2`的固定16题质量坐标诊断：仅正对角变量/约束缩放，恢复原W、t和对偶后按原系数复核，沿用mixed及所有容差；不自动更换正式后端。69项CPU回归通过，真实GPU改善尚未验证，手动小测命令见模块README。

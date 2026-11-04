@@ -6,6 +6,34 @@
 
 固定共同名单289图（77正常、212异常），继续排除两组支持并集；原Source66校准、固定K8顺序。评价2312 LP、校准528 LP，共2840 LP，363张独立区域图（66+8+289）。只输出六分支Image AUROC/AP，primary仍为CAPACITY_FUSION。原特征、RMS、256区域、面积、距离、每完整模板LP和8模板min、Source校准及等权融合定义不变。seed43/illumination/view均不请求，无像素/AUPRO、训练、memory重建或参数搜索。
 
+### 16题的等价质量坐标诊断（不启动正式阶段）
+
+原坐标mixed在服务器30秒检查中未通过对偶验收；延长到120秒仍失败，不能靠继续增加时限宣布已解决。新增 `lp_v2` 的固定诊断入口，仅只读使用原16题导出，两个8题批次、每批30秒、mixed/Stable3及全部停止与验收阈值保持不变。正式worker仍使用原坐标，不自动换后端或恢复2840项。
+
+内部令 `k=n=256`、`z_ij=k*a_i*W_ij`，t不变。三类约束等价写为 `sum_j z_ij=k*a_i`、`sum_i z_ij=k*b_j`、`sum_j d_ij*z_ij <= k*a_i*t`。这是正对角变量和行缩放，不是总成本OT，不删除约束或更改面积。内部矩阵仍来自原LP的 `R*A*S^-1`，rhs为R*rhs。返回后用 `W=z/(k*a_i)` 和 `y_original=R*y_solver` 映射原始及对偶向量，**所有检查仍在原未缩放系数下执行**。不会裁剪、重归一化或选择CPU运输矩阵。
+
+新目录保存 `trial_inputs.json`、`LP_checks.csv`、每批原始solver统计、summary和每题的内部/映射后primal与dual。精度、CPU参考、原输入来源和实际设置一并记录。诊断没有正式pair/预测提交能力；即使16项通过，也需根据实测成本与一致性决定后续正式接入。失败保留未完成，不自动尝试其他缩放、精度或域。数学等价性的CPU检查不代表实际GPU收敛已改善。
+
+代码同步后在服务器手动执行，无需安装或重提特征：
+
+```bash
+cd /home/ubun/YYK/DINO-Reference-AD
+parent=$(cat /home/ubun/YYK/runs/latest_reverse_capacity_run.txt)
+trial="${parent}_mass_flow_$(date +%Y%m%d_%H%M%S)"
+set -o pipefail
+CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+XDG_CACHE_HOME=/home/ubun/YYK/.cache CUDA_CACHE_PATH=/home/ubun/YYK/.cache/cuda \
+CUPY_CACHE_DIR=/home/ubun/YYK/.cache/cupy NUMBA_CACHE_DIR=/home/ubun/YYK/.cache/numba \
+ /home/ubun/YYK/conda_envs/yyk_lp/bin/python -B -u \
+ -m DINOv3.MADEqual.aebad_s_reverse_capacity_coverage_p0.lp_v2 \
+ --problem-root "${parent}_gpu_lp_fp32" --output-root "$trial" \
+ 2>&1 | tee "${trial}_launcher.log"
+```
+
+求解时间上限合计约60秒，初始化、稀疏建模、原系数复核和证明包落盘另计。不能用这个上限承诺会收敛或推算正式总耗时。没有新增大文件读取校验、资源门槛、服务器连接或自定义Triton。新增执行检查仅为选择新输出且不与原导出重叠、显式单GPU、固定16题身份；原数值验收完全保留。
+
+本地69项CPU回归通过（51.928秒），包含矩形/不均衡面积LP的原始目标及对偶映射、两个独立块的映射、缺失/不合格证据拒绝，以及诊断仅写16项且不提交正式pair。未在本地初始化CUDA，未连接服务器；GPU收敛和吞吐仍未知。新代码改变实现身份，不应直接用旧phase1目录运行all来绕过冻结记录；本诊断始终使用独立输出目录。
+
 ### 新数值验收
 
 | 项目 | 新协议 |
