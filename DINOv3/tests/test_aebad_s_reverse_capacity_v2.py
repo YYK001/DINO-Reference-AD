@@ -156,6 +156,74 @@ class MassFlowCoordinateTests(unittest.TestCase):
             self.assertEqual(len(ip.csv_rows(a.output_root/'LP_checks.csv')),16)
 
 
+class IndependentMassBasisTests(unittest.TestCase):
+    def test_basis_removes_only_one_dependent_capacity_row_without_changing_inputs(self):
+        p,x,y=exact();before={k:p[k].copy() for k in ('distance','a','b')}
+        full,S,R=v.mass_flow_batch([p]);basis,SS,RR=v.mass_flow_basis_batch([p])
+        self.assertEqual(basis['omitted_capacity'],[0])
+        keep=np.arange(full['matrix'].shape[0])!=2
+        np.testing.assert_array_equal(basis['matrix'].toarray(),full['matrix'][keep].toarray())
+        np.testing.assert_array_equal(basis['rhs'],full['rhs'][keep])
+        np.testing.assert_array_equal(S,SS);np.testing.assert_array_equal(R,RR)
+        E=basis['matrix'][basis['senses']=='E'].toarray()
+        self.assertEqual(np.linalg.matrix_rank(E),E.shape[0])
+        for k in before:np.testing.assert_array_equal(before[k],p[k])
+
+    def test_reduced_blocks_map_to_complete_original_primal_and_dual_certificates(self):
+        p,x,y=exact();q,xx,yy=exact([[.8,.9,.7],[.9,.7,.8]],[.2,.8],[.2,.3,.5]);solver=v.Solver.__new__(v.Solver)
+        def cpu_tiny_only(batch):
+            E=batch['senses']=='E';L=~E
+            r=linprog(batch['objective'],A_eq=batch['matrix'][E],b_eq=batch['rhs'][E],A_ub=batch['matrix'][L],
+                b_ub=batch['rhs'][L],bounds=(0,None),method='highs-ds',
+                options=dict(primal_feasibility_tolerance=1e-10,dual_feasibility_tolerance=1e-9))
+            self.assertTrue(r.success,r.message);dual=np.zeros(len(E));dual[E]=r.eqlin.marginals;dual[L]=r.ineqlin.marginals
+            return dict(primal=r.x,dual=dual,status='Optimal',solved_by='PDLP',error_status=0)
+        solver.solve=cpu_tiny_only
+        results,_=solver.solve_certified([p,q],coordinate_system='mass_flow_basis_v1')
+        for problem,result in zip((p,q),results):
+            n,m=problem['distance'].shape;a=result['audit'];self.assertTrue(a['accepted'],a)
+            self.assertEqual(len(result['dual']),2*n+m);self.assertEqual(len(result['solver_dual']),2*n+m-1)
+            self.assertEqual(result['dual'][n+a['omitted_capacity_region']],0.)
+            self.assertTrue(a['all_original_constraints_checked']);self.assertAlmostEqual(a['objective'],problem['reference_objective'],places=10)
+
+    def test_non_roundoff_mass_imbalance_is_not_silently_normalized(self):
+        p,x,y=exact();p['b']=p['b'].copy();p['b'][0]+=1e-13;before=p['b'].copy()
+        old.validate_inputs(p['distance'],p['a'],p['b'])
+        with self.assertRaisesRegex(ValueError,'no renormalization'):v.mass_flow_basis_batch([p])
+        np.testing.assert_array_equal(before,p['b'])
+
+    def test_omitted_capacity_is_still_independently_checked(self):
+        p,x,y=exact(np.zeros((3,3)),np.ones(3)/3,np.ones(3)/3)
+        W=x[:-1].reshape(3,3);W[:]=np.eye(3);W[:,0]+=8e-6
+        check=v.audit(p,x,y,'TimeLimit')
+        self.assertTrue(check['checks']['row']);self.assertFalse(check['checks']['capacity']);self.assertFalse(check['accepted'])
+
+    def test_wrong_raw_dual_length_cannot_be_accepted_after_expansion(self):
+        p,x,y=exact();batch,S,R=v.mass_flow_basis_batch([p]);solver=v.Solver.__new__(v.Solver)
+        solver.solve=lambda b:dict(primal=x*S,dual=np.r_[y/R,0.],status='Optimal',solved_by='PDLP',error_status=0)
+        results,_=solver.solve_certified([p],coordinate_system='mass_flow_basis_v1')
+        self.assertFalse(results[0]['audit']['accepted'])
+
+    def test_basis_trial_uses_fixed_longer_solve_but_original_acceptance_and_only_16_cases(self):
+        p,x,y=exact();problems=[dict(p,id=f'{i:02d}') for i in range(16)]
+        class FakeSolver:
+            observed=[]
+            def __init__(self,workers,time_limit):FakeSolver.observed.append((workers,time_limit))
+            def solve_certified(self,group,coordinate_system):
+                FakeSolver.observed.append((len(group),coordinate_system))
+                return [dict(primal=x,dual=y,solver_primal=x,solver_dual=y,audit=v.audit(p,x,y,'TimeLimit')) for _ in group],dict(solver={'status':'TimeLimit'})
+        with tempfile.TemporaryDirectory() as tmp:
+            a=SimpleNamespace(problem_root=Path(tmp)/'old',output_root=Path(tmp)/'new',cpu_workers=7,coordinate_system='mass_flow_basis_v1')
+            with patch.object(v.gpu,'load_problems',return_value=(dict(seal='same16'),problems)),patch('builtins.print'):
+                result=v.mass_flow_trial(a,FakeSolver)
+            self.assertEqual(FakeSolver.observed,[(7,300.),(8,'mass_flow_basis_v1'),(8,'mass_flow_basis_v1')])
+            self.assertEqual(result['accepted'],16);self.assertFalse(result['formal_backend_changed'])
+            binding=ph.st.sealed_json(a.output_root/'trial_inputs.json')
+            self.assertEqual(binding['acceptance_protocol'],v.PROTOCOL)
+            self.assertEqual(binding['actual_settings'],dict(v.settings(),time_limit=300.))
+            self.assertFalse((a.output_root/'pairs').exists())
+
+
 class ScopeAndReuseTests(unittest.TestCase):
     def test_plan_and_observations_do_not_expand_settings(self):
         samples=[dict(image(str(i)),sample_id=str(i),label=int(i>=77)) for i in range(289)]

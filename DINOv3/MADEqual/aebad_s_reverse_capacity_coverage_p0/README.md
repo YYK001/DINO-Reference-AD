@@ -8,6 +8,37 @@
 
 ### 16题的等价质量坐标诊断（不启动正式阶段）
 
+**后续进展：完整质量坐标的服务器测试仍为0/16通过。用户要求优先达到精度，再评估正式总耗时。** 仅缩放未解决对偶/间隙问题。新增同入口的显式 `--coordinate-system mass_flow_basis_v1`，继续只测试原16题；旧的 `mass_flow_v1` 默认值保留，历史记录不覆盖。
+
+#### 当前固定检查：独立质量等式组
+
+完整质量守恒的n+m条等式有一条线性依赖：所有容量式之和等于按a_i加权的所有行和式。新诊断仅向求解器传n+m−1条独立等式，固定省去最大b_j对应的容量式（由面积决定，不读测试结果）；返回时该行对偶补0以固定自由度，**原始全部n+m条等式、包括省去的容量式，仍逐项按原容差验收**。不修改W、t、面积或距离，不裁剪/归一化解。消去前要求两侧总质量一致到FP64求和舍入量级；不满足则拒绝这项简化而不修改输入。
+
+CPU示例确认了原系数在FP32矩阵中可能失去依赖的一致性；这是一种可能阻碍混合迭代的机制，并非已经证明服务器全部失败的根因。独立等式组不能保证GPU收敛，仍需真实16题测试。采用原mixed、Stable3、1e-7内部停止参数和原1e-5独立验收；仅本次独立等式诊断的时限固定为300秒/批，两个8题批次最多约10分钟求解。不是精度/模式/缩放参数扫描，不运行其他设置或正式2840项。
+
+已同步代码后，运行该固定诊断（与旧缩放试验的新目录分开）：
+
+```bash
+cd /home/ubun/YYK/DINO-Reference-AD
+parent=$(cat /home/ubun/YYK/runs/latest_reverse_capacity_run.txt)
+trial="${parent}_mass_basis_$(date +%Y%m%d_%H%M%S)"
+set -o pipefail
+CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+XDG_CACHE_HOME=/home/ubun/YYK/.cache CUDA_CACHE_PATH=/home/ubun/YYK/.cache/cuda \
+CUPY_CACHE_DIR=/home/ubun/YYK/.cache/cupy NUMBA_CACHE_DIR=/home/ubun/YYK/.cache/numba \
+ /home/ubun/YYK/conda_envs/yyk_lp/bin/python -B -u \
+ -m DINOv3.MADEqual.aebad_s_reverse_capacity_coverage_p0.lp_v2 \
+ --coordinate-system mass_flow_basis_v1 \
+ --problem-root "${parent}_gpu_lp_fp32" --output-root "$trial" \
+ 2>&1 | tee "${trial}_launcher.log"
+```
+
+证明包保存内部767行及恢复后768行的对偶，省去区域编号、原质量和差及实际设置；正式入口仍未切换。新增检查只有消去依赖所需的质量一致性和完整批向量形状，没有大数组重哈希或机器容量门槛。关于12小时的正式预算判断暂不用于决定本精度诊断是否成功；这不构成自动启动不限时正式阶段的指令。
+
+75项本地CPU回归通过（51.302秒）。新增覆盖独立等式组秩、矩形多块的原始/对偶恢复、被省去容量式仍会拒绝违规解、质量不一致不归一化、错误对偶长度拒绝，以及16项/300秒固定范围。真实cuOpt独立等式组收敛尚未验证。
+
+#### 早期mass_flow_v1检查（已在服务器失败，保留说明）
+
 原坐标mixed在服务器30秒检查中未通过对偶验收；延长到120秒仍失败，不能靠继续增加时限宣布已解决。新增 `lp_v2` 的固定诊断入口，仅只读使用原16题导出，两个8题批次、每批30秒、mixed/Stable3及全部停止与验收阈值保持不变。正式worker仍使用原坐标，不自动换后端或恢复2840项。
 
 内部令 `k=n=256`、`z_ij=k*a_i*W_ij`，t不变。三类约束等价写为 `sum_j z_ij=k*a_i`、`sum_i z_ij=k*b_j`、`sum_j d_ij*z_ij <= k*a_i*t`。这是正对角变量和行缩放，不是总成本OT，不删除约束或更改面积。内部矩阵仍来自原LP的 `R*A*S^-1`，rhs为R*rhs。返回后用 `W=z/(k*a_i)` 和 `y_original=R*y_solver` 映射原始及对偶向量，**所有检查仍在原未缩放系数下执行**。不会裁剪、重归一化或选择CPU运输矩阵。
