@@ -242,3 +242,10 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 仅质量坐标缩放仍未通过服务器验收。现增加显式`mass_flow_basis_v1`，在求解器内部消去一条依赖容量等式，恢复对偶后仍检查全部原始约束；300秒/批，仅原16项，精度要求不变。75项CPU回归通过；真实GPU收敛仍待验证，正式阶段未自动恢复。
 
 当前只做最后一轮`final-check`：在现有适配器与原系数验收上比较00/08的单题mixed PDLP和原生GPU Barrier，120秒/题；仅2/2合格且成本允许的后端补14题，最多18次，无重试/切换/暖机，不自动启动2840项。失败准确收束为“当前求解路径未能在可接受成本下可靠完成，尚未取得正式检测结果。”运行命令、计时/成本边界、原始向量和第51节追加文案见模块README。88项不同CPU测试及Bash夹具通过，真实GPU结果仍待服务器执行；旧all不是本轮入口。
+
+
+## 外围几何与中心原图次序证据
+
+[固定配置与手动工作站入口](DINOv3/MADEqual/aebad_s_annular_ordinal_p0/README.md)及[实现审计与检查清单](DINOv3/MADEqual/aebad_s_annular_ordinal_p0/implementation_audit.md)。仅background/seed42原K8、共同289图与Source66校准；455张原始Source正常图及K8建立像素参照，不提取DINO或训练。固定外围二进制描述、现成OpenCV FLANN-LSH、同图仿射和竞争解释先冻结，再计算中心24比较的一致性证据。三个固定融合加原SEGMENT及三项辅助E，只新增Image AUROC/AP；原定位引用不重算。
+
+默认只读preflight，不导入Torch或初始化GPU；最多8 CPU，固定4张完整正常图smoke、12h成本暂停、分块续跑。复用NPZ检查记录大小、可读性与必要结构，未变文件不重复解压，无新增全量SHA扫描。21项CPU测试、12份Python编译及工作站脚本语法检查通过；真实463图索引、RAM、整图吞吐与检测效果尚未验证。容量LP已终止，不由此工具恢复。数据、缓存、资产盘点与本地结果不上传。

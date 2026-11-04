@@ -1068,3 +1068,26 @@ DINOv3/tests/test_aebad_s_reverse_capacity_v2.py
 ### 最后一次固定单题后端核查（2026-11-04）
 
 仅修改原有gpu_lp/lp_v2、两个运行脚本、原v2测试、模块README/审计和仓库说明。复用原LP构造、输入导出、验收、资产盘点及资源记录；没有新求解模块、检测器或重复工具。比较PDLP mixed与GPU Barrier，四次单题合格才有限扩展14题，最多18次，原坐标/原容差、无自动重试/正式任务。88项不同CPU测试及Bash启动夹具通过；真实GPU尚未执行。不上传本地验证JSON/日志、旧或新结果、向量、矩阵、权重、特征或环境。
+
+
+## 外围几何与中心原图次序证据（2026-11-04）
+
+```text
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/__init__.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/evidence.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/geometry.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/implementation_audit.md
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/index.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/inputs.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/pipeline.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/pixels.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/protocol.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/README.md
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/reporting.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/runner.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/runtime.py
+DINOv3/MADEqual/aebad_s_annular_ordinal_p0/scripts/run_workstation.sh
+DINOv3/tests/test_aebad_s_annular_ordinal.py
+```
+
+仅新增固定方法实现、CPU测试、说明和审计，并更新仓库索引；包含已完成图/未完成图的损坏NPZ续跑P2修复。复用现有划分、Source＋K8 P合同、原始解码、图像评价、快速本地存储及归档接口，不修改历史方法或结果。21项CPU测试通过；真实原图索引和整图实验未执行。排除datasets、server_results、outputs、本地预检/验证JSON、日志、灰度/描述/NPZ窗口缓存、索引文件、权重及环境。
