@@ -234,3 +234,5 @@ WITNESS默认strict不变；用户显式选择`--reuse-recovery <旧支持提取
 新增可选FP32 GPU LP精度对照入口 `aebad_s_reverse_capacity_coverage_p0.gpu_lp`：从已完成smoke的区域及16个CPU参考解导出小问题，在独立cuOpt环境手动测试。使用现成PDLP、单GPU、原容差逐题核对，不自动替换正式求解器或恢复全量实验；不重提特征/重算RMS。43项本地CPU测试通过；真实cuOpt API、FP32收敛与吞吐待服务器验证。环境准备、测速命令和完整检查清单见同模块README与审计。
 
 后续显式 `--precision mixed` 对照仅切换cuOpt官方精度模式，保留原LP及容差。`--problem-root` 可直接只读引用上次导出的16题，新目录保存混合结果，无需重新导出或安装依赖。46项本地CPU测试通过，mixed GPU精度与吞吐待用户测量；不自动启用正式实验。
+
+当前工作站默认 `mixed_background_v2`：仅background/seed42共同289图、Source66、固定K8，共2840 LP，六分支图像AUROC/AP。新LP协议采用1e-5原始/对偶/间隙验收；逐LP保存原解及对偶，满足全部要求的TimeLimit明确记近似解。先复核原16题与真实成本，超过12h等待同意；复用旧RMS/区域/距离/合法严格CPU结果，独立yyk_lp常驻求解进程。默认preflight，显式tmux启动入口与完整检查说明见模块README。实际新版GPU复核和正式指标尚待服务器执行。

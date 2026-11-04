@@ -7,12 +7,28 @@ from .protocol import *
 st=ip.st
 
 
+def settings(a):return [('background',42)] if getattr(a,'lp_profile','cpu_v1')=='mixed_background_v2' else [(d,s) for d in DOMAINS for s in SEEDS]
+
+
+def region_rows(a):
+    x=ip.assets(a);rows={r['relative_path']:r for r in x.calibration}
+    for d,s in settings(a):
+        for r in [*x.supports(d,s),*x.samples(d)]:rows[r['relative_path']]=r
+    return sorted(rows.values(),key=lambda r:r['relative_path'])
+
+
+def engine(a,rms):
+    if getattr(a,'lp_profile','cpu_v1')=='mixed_background_v2':
+        from .mixed_runtime import Coverage
+        return Coverage(a,rms)
+    return rt.Coverage(a,rms)
+
+
 def observations(a):
     x=ip.assets(a)
-    for d in DOMAINS:
-        for s in SEEDS:
-            for row in x.calibration:yield d,s,'Source',row
-            for row in x.samples(d):yield d,s,'query',row
+    for d,s in settings(a):
+        for row in x.calibration:yield d,s,'Source',row
+        for row in x.samples(d):yield d,s,'query',row
 
 
 def budget(a,estimate=None):
@@ -28,10 +44,11 @@ def budget(a,estimate=None):
 
 def prepare(a):
     rms=rt.source_rms(a,lambda *_:budget(a));x=ip.assets(a);entries=[]
-    for i,row in enumerate(x.region_rows(),1):
+    rows=region_rows(a)
+    for i,row in enumerate(rows,1):
         _,record=rt.region(a,row,rms)
-        entries.append(dict(image=ip.image(row),path=str(rt.region_path(a,row)),seal=record['seal']))
-        if i%10==0:print(f'[coverage prepare] {i}/{len(x.region_rows())} unique images',flush=True);budget(a)
+        entries.append(dict(image=ip.image(row),path=str(rt.cached_region_path(a,row,rms) or rt.region_path(a,row)),seal=record['seal']))
+        if i%10==0:print(f'[coverage prepare] {i}/{len(rows)} unique images',flush=True);budget(a)
     result=st.sealed_json(a.run_root/'prepared.json',dict(identity=ip.signature(a),RMS=rms['seal'],regions=entries))
     return dict(status='regions_complete',images=len(entries),seal=result['seal'])
 
@@ -124,28 +141,27 @@ def predict(a):
                 st.write_json(a.run_root/'budget_pause.json',dict(status='pending_12h_consent',recorded_elapsed_seconds=used,**projection))
                 raise RuntimeError('observed throughput projects this run beyond 12h; committed pairs retained, explicit consent required')
         budget(a);return r
-    with rt.Coverage(a,rms) as engine:
-        for d in DOMAINS:
-            for s in SEEDS:
-                normals=[]
-                for i,row in enumerate(x.calibration,1):
-                    normals.append(observe(engine,d,s,'Source',row))
-                    if i%10==0:print(f'[coverage calibration] {d}/seed{s} {i}/66',flush=True)
-                model=nm.calibration(normals)
-                parameter=st.sealed_json(a.run_root/d/f'seed{s}'/'calibration.json',dict(identity=ip.signature(a),
-                    population=[ip.image(r) for r in x.calibration],observations=[r['seal'] for r in normals],parameters=model,GT_used=False))
-                parameters.append(dict(domain=d,support_seed=s,seal=parameter['seal']))
-                for i,row in enumerate(x.samples(d),1):
-                    obs=observe(engine,d,s,'query',row)
-                    values,invalid=nm.scores(obs['P'],obs['cap'],obs['free'],model)
-                    record=st.sealed_json(a.run_root/d/f'seed{s}'/'scores'/(row['sample_id']+'.json'),dict(
-                        identity=ip.signature(a),domain=d,support_seed=s,sample_id=row['sample_id'],image=ip.image(row),
-                        scores=values,blocked=invalid,calibration=parameter['seal'],observation=obs['seal'],
-                        map_hash=x.query[d,s,row['sample_id']]['map_hash'],map_reference='UNION_SOURCE_WEIGHT',GT_used=False))
-                    all_records.append(dict(domain=d,support_seed=s,sample_id=row['sample_id'],seal=record['seal']))
-                    blocked.extend(dict(domain=d,support_seed=s,branch=b,reason=why) for b,why in invalid.items())
-                    budget(a)
-                    if i%10==0:print(f'[coverage predict] {d}/seed{s} {i}/{len(x.samples(d))} eight_whole_templates',flush=True)
+    with engine(a,rms) as solver:
+        for d,s in settings(a):
+            normals=[]
+            for i,row in enumerate(x.calibration,1):
+                normals.append(observe(solver,d,s,'Source',row))
+                if i%10==0:print(f'[coverage calibration] {d}/seed{s} {i}/66',flush=True)
+            model=nm.calibration(normals)
+            parameter=st.sealed_json(a.run_root/d/f'seed{s}'/'calibration.json',dict(identity=ip.signature(a),
+                population=[ip.image(r) for r in x.calibration],observations=[r['seal'] for r in normals],parameters=model,GT_used=False))
+            parameters.append(dict(domain=d,support_seed=s,seal=parameter['seal']))
+            for i,row in enumerate(x.samples(d),1):
+                obs=observe(solver,d,s,'query',row)
+                values,invalid=nm.scores(obs['P'],obs['cap'],obs['free'],model)
+                record=st.sealed_json(a.run_root/d/f'seed{s}'/'scores'/(row['sample_id']+'.json'),dict(
+                    identity=ip.signature(a),domain=d,support_seed=s,sample_id=row['sample_id'],image=ip.image(row),
+                    scores=values,blocked=invalid,calibration=parameter['seal'],observation=obs['seal'],
+                    map_hash=x.query[d,s,row['sample_id']]['map_hash'],map_reference='UNION_SOURCE_WEIGHT',GT_used=False))
+                all_records.append(dict(domain=d,support_seed=s,sample_id=row['sample_id'],seal=record['seal']))
+                blocked.extend(dict(domain=d,support_seed=s,branch=b,reason=why) for b,why in invalid.items())
+                budget(a)
+                if i%10==0:print(f'[coverage predict] {d}/seed{s} {i}/{len(x.samples(d))} eight_whole_templates',flush=True)
     frozen=st.sealed_json(a.run_root/'predictions_frozen.json',dict(identity=ip.signature(a),records=all_records,calibrations=parameters,
         pending=sorted({f"{r['domain']}/seed{r['support_seed']}/{r['branch']}" for r in blocked}),GT_used=False))
     st.write_csv(a.run_root/'blocked_branches.csv',list({(r['domain'],r['support_seed'],r['branch']):r for r in blocked}.values()))
@@ -158,45 +174,44 @@ def evaluate(a):
     frozen=st.sealed_json(a.run_root/'predictions_frozen.json')
     if frozen['identity']!=ip.signature(a):raise ValueError('frozen scores use another configuration')
     x=ip.assets(a);index={(r['domain'],r['support_seed'],r['sample_id']):r for r in frozen['records']}
-    if len(index)!=1804:raise ValueError('complete prediction population must be frozen before labels are evaluated')
+    if len(index)!=sum(len(x.samples(d)) for d,s in settings(a)):raise ValueError('complete requested prediction population must be frozen before labels are evaluated')
     metrics=[];table=[];normal_table=[];template_table=[]
-    for d in DOMAINS:
-        for s in SEEDS:
-            records=[]
-            for row in x.samples(d):
-                record=st.sealed_json(a.run_root/d/f'seed{s}'/'scores'/(row['sample_id']+'.json'))
-                if record['seal']!=index[d,s,row['sample_id']]['seal'] or record['image']!=ip.image(row):raise ValueError('prediction identity changed')
-                records.append(record)
-                table.append(dict(domain=d,support_seed=s,sample_id=row['sample_id'],label=row['label'],**record['scores']))
-                obs=st.sealed_json(a.run_root/d/f'seed{s}'/'coverage'/(ip.key(row)+'.json'))
-                if record['observation']!=obs['seal']:raise ValueError('coverage observation changed')
-                for ref in obs['templates']:
-                    template_table.append(dict(domain=d,support_seed=s,kind='query',image=row['relative_path'],
-                        template=ref['template']['relative_path'],cap=ref['result']['objective'],free=ref['result']['free'],
-                        cap_winner=ref['template']==obs['cap_template'],free_winner=ref['template']==obs['free_template'],
-                        solver_success=ref['result']['success'],**ref['result']['feasibility']))
-            labels=[r['label'] for r in x.samples(d)]
-            for branch in BRANCHES:
-                if any(branch not in r['scores'] for r in records):continue
-                v=[r['scores'][branch] for r in records]
-                metrics.append(dict(domain=d,support_seed=s,branch=branch,image_AUROC=float(roc_auc_score(labels,v)),
-                    image_AP=float(average_precision_score(labels,v)),images=len(records),localization='inherited_UNION_SOURCE_WEIGHT_unchanged'))
-            model=st.sealed_json(a.run_root/d/f'seed{s}'/'calibration.json')['parameters']
-            for row in x.calibration:
-                obs=st.sealed_json(a.run_root/d/f'seed{s}'/'coverage'/(ip.key(row)+'.json'))
-                normal_table.append(dict(domain=d,support_seed=s,image=row['relative_path'],P=obs['P'],cap=obs['cap'],free=obs['free'],
-                    cap_template=obs['cap_template']['relative_path'],free_template=obs['free_template']['relative_path']))
-                for ref in obs['templates']:
-                    template_table.append(dict(domain=d,support_seed=s,kind='Source',image=row['relative_path'],
-                        template=ref['template']['relative_path'],cap=ref['result']['objective'],free=ref['result']['free'],
-                        cap_winner=ref['template']==obs['cap_template'],free_winner=ref['template']==obs['free_template'],
-                        solver_success=ref['result']['success'],**ref['result']['feasibility']))
-            # Positive affine P standardization must preserve ranking/metrics.
-            if model['P']['status']=='valid':
-                P=np.array([r['scores'][BASE] for r in records]);z=(P-model['P']['mean'])/model['P']['std']
-                if (abs(roc_auc_score(labels,z)-roc_auc_score(labels,P))>1e-12 or
-                    abs(average_precision_score(labels,z)-average_precision_score(labels,P))>1e-12):
-                    raise ValueError('positive affine SEGMENT calibration changed ranking')
+    for d,s in settings(a):
+        records=[]
+        for row in x.samples(d):
+            record=st.sealed_json(a.run_root/d/f'seed{s}'/'scores'/(row['sample_id']+'.json'))
+            if record['seal']!=index[d,s,row['sample_id']]['seal'] or record['image']!=ip.image(row):raise ValueError('prediction identity changed')
+            records.append(record)
+            table.append(dict(domain=d,support_seed=s,sample_id=row['sample_id'],label=row['label'],**record['scores']))
+            obs=st.sealed_json(a.run_root/d/f'seed{s}'/'coverage'/(ip.key(row)+'.json'))
+            if record['observation']!=obs['seal']:raise ValueError('coverage observation changed')
+            for ref in obs['templates']:
+                template_table.append(dict(domain=d,support_seed=s,kind='query',image=row['relative_path'],
+                    template=ref['template']['relative_path'],cap=ref['result']['objective'],free=ref['result']['free'],
+                    cap_winner=ref['template']==obs['cap_template'],free_winner=ref['template']==obs['free_template'],
+                    solver_success=ref['result']['success'],**ref['result']['feasibility']))
+        labels=[r['label'] for r in x.samples(d)]
+        for branch in BRANCHES:
+            if any(branch not in r['scores'] for r in records):continue
+            v=[r['scores'][branch] for r in records]
+            metrics.append(dict(domain=d,support_seed=s,branch=branch,image_AUROC=float(roc_auc_score(labels,v)),
+                image_AP=float(average_precision_score(labels,v)),images=len(records),localization='inherited_UNION_SOURCE_WEIGHT_unchanged'))
+        model=st.sealed_json(a.run_root/d/f'seed{s}'/'calibration.json')['parameters']
+        for row in x.calibration:
+            obs=st.sealed_json(a.run_root/d/f'seed{s}'/'coverage'/(ip.key(row)+'.json'))
+            normal_table.append(dict(domain=d,support_seed=s,image=row['relative_path'],P=obs['P'],cap=obs['cap'],free=obs['free'],
+                cap_template=obs['cap_template']['relative_path'],free_template=obs['free_template']['relative_path']))
+            for ref in obs['templates']:
+                template_table.append(dict(domain=d,support_seed=s,kind='Source',image=row['relative_path'],
+                    template=ref['template']['relative_path'],cap=ref['result']['objective'],free=ref['result']['free'],
+                    cap_winner=ref['template']==obs['cap_template'],free_winner=ref['template']==obs['free_template'],
+                    solver_success=ref['result']['success'],**ref['result']['feasibility']))
+        # Positive affine P standardization must preserve ranking/metrics.
+        if model['P']['status']=='valid':
+            P=np.array([r['scores'][BASE] for r in records]);z=(P-model['P']['mean'])/model['P']['std']
+            if (abs(roc_auc_score(labels,z)-roc_auc_score(labels,P))>1e-12 or
+                abs(average_precision_score(labels,z)-average_precision_score(labels,P))>1e-12):
+                raise ValueError('positive affine SEGMENT calibration changed ranking')
     st.write_csv(a.run_root/'setting_metrics.csv',metrics);st.write_csv(a.run_root/'metrics.csv',aggregate(metrics))
     st.write_csv(a.run_root/'per_image_scores.csv',table);st.write_csv(a.run_root/'normal_calibration.csv',normal_table)
     st.write_csv(a.run_root/'template_costs.csv',template_table)

@@ -1,5 +1,6 @@
 """Streaming full-grid preparation and region-only LP jobs. No Source retrieval."""
 import time
+import copy
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
@@ -65,7 +66,20 @@ def source_rms(a,progress=None):
 def region_path(a,row):return a.cache_root/'regions'/ip.key(row)
 
 
+def cached_region_path(a,row,rms):
+    for root in [a.cache_root,*getattr(a,'region_caches',[])]:
+        probe=copy.copy(a);probe.cache_root=Path(root)
+        path=region_path(probe,row)
+        if (path/'manifest.json').is_file():
+            ip.cached_region(probe,row,rms,None)
+            return path
+    return None
+
+
 def region(a,row,rms):
+    if getattr(a,'lp_profile','cpu_v1')=='mixed_background_v2':
+        existing=cached_region_path(a,row,rms)
+        if existing is not None:return st.get(existing)
     path=region_path(a,row);ref=ip.region_feature_ref(a,row)
     cached=ip.cached_region(a,row,rms,ref)
     if cached is not None:

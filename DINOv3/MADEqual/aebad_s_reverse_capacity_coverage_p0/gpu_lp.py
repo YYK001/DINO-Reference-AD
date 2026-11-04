@@ -66,11 +66,17 @@ class CuOptPDLP:
         build=time.perf_counter()-tick;tick=time.perf_counter()
         solution=self.lp.Solve(model,self.settings)
         solved_by=solution.get_solved_by();status=solution.get_termination_reason()
+        dual=solution.get_dual_solution() if hasattr(solution,'get_dual_solution') else None
+        error=solution.get_error_status() if hasattr(solution,'get_error_status') else None
         return dict(primal=np.asarray(solution.get_primal_solution(),np.float64),
+            dual=np.asarray(dual,np.float64) if dual is not None else np.array([],np.float64),
             objective=float(solution.get_primal_objective()),status=status,
             solver_optimal=status.lower()=='optimal',GPU_PDLP=solved_by==self.method,
             solved_by=getattr(solved_by,'name',str(solved_by)),model_seconds=build,
             solve_call_seconds=time.perf_counter()-tick,engine_seconds=float(solution.get_solve_time()),
+            reported_dual_objective=float(solution.get_dual_objective()) if hasattr(solution,'get_dual_objective') else None,
+            error_status=int(getattr(error,'value',error)) if error is not None else None,
+            error_message=solution.get_error_message() if hasattr(solution,'get_error_message') else None,
             convergence={k:float(v) for k,v in solution.get_lp_stats().items()})
 
 
@@ -210,7 +216,7 @@ def trial(a,backend_factory=CuOptPDLP):
                 begin=time.perf_counter();batch=sparse_batch(group)
                 try:
                     solved=backend.solve(batch);checks=check_solution(group,batch,solved)
-                    details={k:v for k,v in solved.items() if k!='primal'}
+                    details={k:v for k,v in solved.items() if k not in ('primal','dual')}
                     value=finite_record(dict(checks=checks,solver=details,error=None))
                 except Exception as e:value=dict(checks=[],solver=None,error=f'{type(e).__name__}: {e}')
                 record=st.sealed_json(path,dict(identity=identity,repeat=repeat,batch=j,problem_ids=[p['id'] for p in group],
@@ -250,7 +256,7 @@ def finite_record(value):
 
 def packages():
     out={}
-    for name in ('numpy','scipy','cuopt','cuopt-cu13','cuopt-cu12','libcuopt-cu13'):
+    for name in ('numpy','scipy','cuopt','cuopt-cu13','cuopt-cu12','libcuopt-cu13','libcuopt-mathopt-cu13','librmm-cu13','cuda-bindings'):
         try:out[name]=version(name)
         except PackageNotFoundError:out[name]=None
     return out

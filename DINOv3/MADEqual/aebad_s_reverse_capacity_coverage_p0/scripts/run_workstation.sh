@@ -5,7 +5,8 @@ repo=${PROJECT_ROOT:-$work/DINO-Reference-AD}
 PY=${PYTHON:-$work/conda_envs/yyk/bin/python}
 stage=${1:-preflight}
 if [ "$#" -gt 0 ]; then shift; fi
-tag=${RUN_TAG:-aebad_reverse_capacity_v1}
+profile=${LP_PROFILE:-mixed_background_v2}
+tag=${RUN_TAG:-aebad_reverse_capacity_background_v2}
 run=${RUN_ROOT:-$work/runs/$tag}
 cache=${CACHE_ROOT:-$work/storage/reverse_capacity_cache/$tag}
 device=${DEVICE:-cpu}
@@ -15,9 +16,21 @@ if [ -n "${GPU_INDEX:-}" ]; then
 fi
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 export XDG_CACHE_HOME="$work/.cache" TMPDIR="$work/tmp" MPLBACKEND=Agg
-mkdir -p "$work/runs" "$work/tmp" "$work/.cache"
+export CUDA_CACHE_PATH="$work/.cache/cuda" CUPY_CACHE_DIR="$work/.cache/cupy" NUMBA_CACHE_DIR="$work/.cache/numba"
+mkdir -p "$work/runs" "$work/tmp" "$work/.cache" "$CUDA_CACHE_PATH" "$CUPY_CACHE_DIR" "$NUMBA_CACHE_DIR"
 cd "$repo"
 extra=()
+if [ "$profile" = mixed_background_v2 ]; then
+  coverage_parent=${COVERAGE_PARENT:-$(cat "$work/runs/latest_reverse_capacity_run.txt")}
+  extra+=(--lp-profile mixed_background_v2 --resume-from "$coverage_parent"
+    --lp-python "${LP_PYTHON:-$work/conda_envs/yyk_lp/bin/python}"
+    --distance-export "${DISTANCE_EXPORT:-${coverage_parent}_gpu_lp_fp32}"
+    --legacy-trial "${coverage_parent}_gpu_lp_fp32" --legacy-trial "${coverage_parent}_gpu_lp_mixed")
+elif [ "$profile" = cpu_v1 ]; then
+  extra+=(--lp-profile cpu_v1)
+else
+  echo "Unknown LP_PROFILE: $profile";exit 1
+fi
 if [ -n "${FEATURE_MANIFEST:-}" ]; then extra+=(--feature-manifest "$FEATURE_MANIFEST");fi
 if [ -n "${RMS_STAT:-}" ]; then extra+=(--rms-stat "$RMS_STAT");fi
 exec "$PY" -B -u -m DINOv3.MADEqual.aebad_s_reverse_capacity_coverage_p0.runner "$stage" \

@@ -29,6 +29,11 @@ def parser():
     p.add_argument('--cpu-workers',type=int,choices=range(1,9),default=8)
     p.add_argument('--extract-missing',action='store_true')
     p.add_argument('--allow-over-12h',action='store_true',help='use only after explicit user approval of an over-12h estimate')
+    p.add_argument('--lp-profile',choices=('cpu_v1','mixed_background_v2'),default='cpu_v1')
+    p.add_argument('--resume-from',type=Path,help='read-only existing reverse-coverage run')
+    p.add_argument('--lp-python',type=Path,default=Path('/home/ubun/YYK/conda_envs/yyk_lp/bin/python'))
+    for flag,dest in (('region-cache','region_caches'),('distance-export','distance_exports'),('legacy-trial','legacy_trials')):
+        p.add_argument('--'+flag,dest=dest,type=Path,action='append',default=[])
     return p
 
 
@@ -68,6 +73,9 @@ class Resources:
 
 
 def execute(a):
+    if a.lp_profile=='mixed_background_v2':
+        from . import phase1
+        return phase1.execute(a)
     if a.stage=='pack':return reporting.pack(a)
     if a.stage=='preflight':
         try:return ip.preflight(a)
@@ -90,13 +98,23 @@ def execute(a):
 def main(argv=None):
     a=normalize(parser().parse_args(argv));a.run_root.mkdir(parents=True,exist_ok=True)
     if a.stage=='all':
-        ip.freeze(a)
-        if not (a.run_root/'smoke.json').is_file():raise ValueError('explicit real-asset smoke and cost estimate required before all')
-        smoke=st.sealed_json(a.run_root/'smoke.json')
-        if smoke['identity']!=ip.signature(a):raise ValueError('smoke input/backend changed')
-        pipeline.budget(a,pipeline.estimate(a,smoke))
+        stages=('prepare','predict','evaluate','summarize','pack')
+        if a.lp_profile=='mixed_background_v2':
+            from . import phase1
+            phase1.configure(a);phase1.freeze(a)
+            if not (a.run_root/'smoke.json').exists():stages=('smoke',*stages)
+            else:
+                r=st.sealed_json(a.run_root/'smoke.json')
+                if r['identity']!=ip.signature(a) or r['accepted']!=16:raise ValueError('complete v2 smoke required before preparation')
+                phase1.estimate(a,r)
+        else:
+            ip.freeze(a)
+            if not (a.run_root/'smoke.json').is_file():raise ValueError('explicit real-asset smoke and cost estimate required before all')
+            smoke=st.sealed_json(a.run_root/'smoke.json')
+            if smoke['identity']!=ip.signature(a):raise ValueError('smoke input/backend changed')
+            pipeline.budget(a,pipeline.estimate(a,smoke))
         common=list(sys.argv[2:] if argv is None else argv[1:])
-        for stage in ('prepare','predict','evaluate','summarize','pack'):
+        for stage in stages:
             log=a.run_root/'logs'/(stage+'.log');log.parent.mkdir(parents=True,exist_ok=True)
             st.write_json(a.run_root/'pipeline_status.json',dict(status='running',stage=stage,success=False))
             print(f'STAGE={stage} LOG={log}',flush=True)
@@ -108,6 +126,7 @@ def main(argv=None):
             print(f'STAGE={stage} EXIT_CODE={rc}',flush=True)
             if rc:
                 st.write_json(a.run_root/'pipeline_status.json',dict(status='stage_failed',stage=stage,success=False,exit_code=rc))
+                if a.lp_profile=='mixed_background_v2':phase1.summarize(a)
                 print(json.dumps(reporting.pack(a)),flush=True);return rc
         status=st.read_json(a.run_root/'status.json');ok=not status['pending']
         st.write_json(a.run_root/'pipeline_status.json',dict(status='complete' if ok else 'pending',success=ok,stage='pack'))

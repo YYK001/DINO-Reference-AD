@@ -1,5 +1,83 @@
 # 面积容量约束的反向覆盖：固定配置
 
+**当前新建运行默认使用工作站脚本的 `LP_PROFILE=mixed_background_v2`，只执行background/seed42。** 下方原六设置CPU协议与早期GPU试验作为历史实现说明保留；本轮运行以本节新版协议为准。直接Python CLI默认仍保留旧 `cpu_v1`，新阶段须显式传 `--lp-profile mixed_background_v2`，旧目录不会被迁移或覆盖。
+
+## 当前阶段：background / seed42，capacity_LP_mixed_v2
+
+固定共同名单289图（77正常、212异常），继续排除两组支持并集；原Source66校准、固定K8顺序。评价2312 LP、校准528 LP，共2840 LP，363张独立区域图（66+8+289）。只输出六分支Image AUROC/AP，primary仍为CAPACITY_FUSION。原特征、RMS、256区域、面积、距离、每完整模板LP和8模板min、Source校准及等权融合定义不变。seed43/illumination/view均不请求，无像素/AUPRO、训练、memory重建或参数搜索。
+
+### 新数值验收
+
+| 项目 | 新协议 |
+|---|---|
+| max行和误差 | ≤1e-5 |
+| max逐列容量相对误差 | max(abs(a@W−b)/b)≤1e-5 |
+| 最大行代价与返回t的一致性 | ≤1e-5×max(1,abs(t)) |
+| 有CPU抽查时的t差 | ≤1e-5×max(1,abs(t_CPU)) |
+| W非负性 | min W≥−1e-10，另记录负质量sum(max(−W,0)) |
+| 原始—对偶归一化间隙 | abs(p−d)/max(1,abs(p)+abs(d))≤1e-5 |
+| 对偶可行性 | 下述两项均≤1e-5 |
+
+本LP写为min c@x，等式E、≤约束L、x=(W,t)≥0。对偶y的E项自由、L项≤0，要求s=c−A.T@y≥0。分别独立重算 `max(max(−s,0))/max(1,||c||∞)` 和 `max(max(y_L,0))/max(1,||c||∞)`；本模型||c||∞=1。原始目标p=c@x=t，对偶目标d=rhs@y。对偶约束符号按官方min-LP约定，绝不自动翻号以挑选能过的解。每个LP单独核对，不能用8题总间隙掩盖个别失败。
+
+记录原始等式L∞误差、不等式违反量、A/B/C/D、最小W/负质量、对偶两个违反量、p/d与归一化gap。cuOpt返回的批级L2原始/对偶残差、原始/对偶目标、原gap、迭代数、停止原因和引擎时间另存，不能把它们冒充逐LP独立口径。原始W与y均存入新cache证明包，后续读取重新验收；不裁剪负值、不归一化或修复解。覆盖分数继续使用返回t，不能改用实际最大行代价。
+
+三类状态：Optimal且独立验收通过；TimeLimit但所有独立验收通过（明确标为近似解）；其他状态/缺证据/不通过均为未完成。旧失败小表不能仅换协议标识就通过。旧CPU严格成功记录允许只读复用，复核原输入、原HiGHS Optimal、原严格可行性/目标检查，记录来源；其原记录未存的对偶值/gap/负质量写NA，不编造为0或“本轮独立重算”。本次新GPU问题都须有完整的原始/对偶证据。
+
+历史SEGMENT P、map/图像/支持身份以及原1e-5检查、距离定义、面积输入和校准退化规则保持原要求。
+
+### 固定求解配置和环境
+
+cuOpt PDLP，显式mixed=2，Stable3、单GPU、crossover=false、每批30秒、per_constraint_residual=true；绝对/相对primal/dual/gap六个停止参数均固定为1e-7，独立验收按上表1e-5，不继承旧HiGHS的1e-10停止要求。没有自动改变参数、加CPU/FP64精修、切Concurrent或更换优化目标。设置常量来自安装版本注册表，不识别时明确失败。
+
+主进程继续在原yyk中做必要的原前向/分区/直接FP32距离，常驻子进程在独立yyk_lp中求解；默认主进程1个CPU槽位、solver最多7线程。cuOpt参数、实际包版本、实际solved_by、error status和日志保留。混合不是全FP32。无需修改或重装原环境。
+
+### 资产、16题复核和时间预算
+
+`--resume-from` 指向原覆盖运行，复用其RMS与区域；原16题导出通过 `--distance-export` 只读接入。其他已有兼容完整区域/距离直接使用，缺少区域时仅对本阶段必要人口生成；缺失完整特征仅在显式 `--extract-missing` 时补提前向，不重提已有图像。Source455不重读、不重建memory。
+
+`preflight`清点当前363图与2840项，严格CPU结果先列候选，在消费时按输入/证据复核；预算使用尚未确认项的上界，不把候选全算作已经复用。新run/cache与旧资产隔离，小记录和原解全部只读保留。没有大数组全量SHA重扫，没有RAM/磁盘/显存容量门槛，没有自动关机。
+
+旧GPU试验仅保存了16题的数值摘要、批级残差等，未保存原始/对偶向量。入口先读取这些小表与可获得的完整日志，输出 `legacy_LP_reaudit.csv/legacy_log_inventory.json`；证据不足仍标未完成，不从batch gap推断每题最优性。只对原16题补齐新协议的证据，不生成新LP输入、不新增全量CPU对照。`LP_review16.csv`固定16题，历史失败尝试另存 `LP_review16_attempts.csv`。
+
+16题全部验收后，最多补准备两张本阶段确实缺失的正式查询区域，测冷/暖前向和分区吞吐，再测最多两组必要新距离的计算/落盘；这些资产后续直接复用，不扩展名单。用全部实际批次端到端耗时（包括失败重试/超时通过、建模、传输、验收、落盘和worker初始化）外推剩余LP；区分冷启动与暖前向、区域、距离、其他CPU/IO未知项，未测不填0。超过12小时则保存budget_pause，停止并等待用户明确同意；不会因此自行扩大范围或重试精度。
+
+`all`在没有当前smoke时先完成上述16题复核与成本估算。未通过或超过预算就停止；通过且预算在约定范围内才依次prepare/predict/evaluate/summarize/pack。只处理本阶段。逐LP提交；中断后复核并复用成功解，完整worker解尚未写pair指针时也可恢复。失败尝试保留，不能以FREE代替。
+
+默认preflight只写暂存的preflight_inputs，不会因为尚未选择GPU就冻结错误的执行身份；显式smoke/all才冻结inputs。工作站脚本将CUDA/CuPy/Numba缓存也限定在YYK/.cache内，不修改base或其他人的目录。
+
+### 服务器手动运行
+
+代码同步后，先显式选择GPU1、设置新目录。原运行指针不覆盖，新运行另记为latest_reverse_capacity_phase1_run.txt。
+
+```bash
+work=/home/ubun/YYK
+cd "$work/DINO-Reference-AD"
+tag=aebad_reverse_capacity_background_v2_$(date +%Y%m%d_%H%M%S)
+export RUN_ROOT="$work/runs/$tag"
+export CACHE_ROOT="$work/storage/reverse_capacity_cache/$tag"
+export COVERAGE_PARENT=$(cat "$work/runs/latest_reverse_capacity_run.txt")
+export LP_PROFILE=mixed_background_v2 GPU_INDEX=1 CPU_WORKERS=8
+script=DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/scripts/run_workstation.sh
+bash "$script" preflight
+# 可先单独复核16题；all会复用它。
+bash "$script" smoke --extract-missing
+# 或显式all：从16题复核开始，经预算检查后只完成background/seed42。
+bash "$script" all --extract-missing
+```
+
+正式执行使用tmux。若超过12小时，贴cost_estimate与budget_pause后再决定；现有allow-over-12h只供用户明确同意后手动指定，默认关闭。
+
+后台入口为同目录 `scripts/run_phase1_tmux.sh`，默认仍只preflight；显式 `GPU_INDEX=1 ... all` 才在tmux中运行本阶段。它生成启动脚本/日志/退出码，写独立phase1指针，保护旧run的启动日志，所有新文件仍在YYK。Bash启动夹具使用假的tmux/runner核对了参数、退出码和旧目录保护，不等于验证过真实Linux GPU求解。
+
+### 交付与完成状态
+
+输出新 `LP_protocol.json/inputs.json/job_plan.json`、16题复核与原始向量、各LP的完成/未完成/失败尝试/停止原因、Source P/cap/free均值std、289张逐图六分支、六分支AUROC/AP、比较表和objective_report。`LP_error_in_calibration_units.csv`在本轮Source尺度可用后报告16题t误差/σcap。8模板min不会放大最大绝对输入误差，但标准化可放大，16题不能保证全域排序不变。
+
+LP_completion含全部2840项（缺项明确未完成），只有全部LP与六分支完成才记完成。原始计划与证明矩阵存机械盘cache，review只含小表/说明/日志。时间/进程树RSS来自阶段记录，GPU主进程torch峰值与worker批后驻留单列；批后采样不是瞬时显存峰值，未测写NA。
+
+以下为原实现与早期试验说明；本阶段不自动运行其中其他域/支持组。
+
 本模块只增加图像评分。预定主候选为 `CAPACITY_FUSION`。没有网络训练、Source重建、参数扫描、Target-LOO校准、实例分析或新增像素/AUPRO作业。三个域均有开发历史。
 
 ## 固定任务

@@ -1047,3 +1047,16 @@ DINOv3/tests/test_aebad_s_reverse_capacity_gpu_lp.py
 同步更新模块README/implementation_audit及仓库说明。仅新增手动预检、16题只读导出和原容差GPU对照；采用官方cuOpt PDLP FP32，不改变正式数学定义，不自动安装或启用GPU。43项CPU测试通过，实际GPU尚未运行；原运行、缓存、距离导出、CPU参考解及gpu_lp_validation.json不上传。
 
 同一入口继续支持显式mixed模式及只读problem-root复用，更新原测试与说明；46项本地CPU测试通过。只改变求解精度选项，原数学定义和容差不变，不带入用户服务器测试结果、缓存或本地验证JSON。
+
+### background/seed42与新版LP数值协议（2026-11-04）
+
+```text
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/lp_v2.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/lp_worker.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/mixed_runtime.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/phase1.py
+DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/scripts/run_phase1_tmux.sh
+DINOv3/tests/test_aebad_s_reverse_capacity_v2.py
+```
+
+同时更新原GPU适配器、runtime/pipeline/runner、工作站脚本及README/审计，复用原分区、LP构造、校准和评分定义。范围仅289共同图+66校准图×K8，2840 LP。新版1e-5验收包含逐LP对偶可行性与归一化gap，TIME_LIMIT数值通过可分类接纳；默认先核对16题，超12h不自动继续。不上传phase1_validation.json、预检/测试日志、历史或新结果、距离/原始-对偶向量、特征/权重或任何缓存。
