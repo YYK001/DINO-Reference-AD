@@ -114,6 +114,8 @@ def preflight(a):
         window_counts={kind:sum(len(px.windows((r['image_height'],r['image_width']))) for r in rows) for kind,rows in (('calibration',x.calibration),('evaluation',x.evaluation))}
         gray_bytes=sum(r['image_height']*r['image_width']*4 for r in x.normal)
         new=[dict(role='original_gray_and_binary_index',images=463,Source_descriptors=source_rows,Target_descriptors=target_rows,
+            Source_native_shards=(source_rows+CONFIG['index']['source_shard_rows']-1)//CONFIG['index']['source_shard_rows'],
+            native_scalar_element_limit=2**31-1,
             binary_bytes=(source_rows+target_rows)*16,gray_cache_bytes=gray_bytes,global_Source_copy_bytes=source_rows*16,
             calibration_and_evaluation_gray_cache_bytes=sum(r['image_height']*r['image_width']*4 for r in x.calibration+x.evaluation),
             native_LSH_RAM_and_saved_index_bytes='unmeasured; native data copies and hash-table entries additional'),

@@ -3,6 +3,7 @@ import time
 import numpy as np
 from . import inputs as ip,runtime as rt
 from .protocol import BASE,FUSIONS,E_NAMES,BRANCHES,CONFIG
+from .index import index_root
 st=ip.st
 
 def fit_calibration(P,E):
@@ -28,7 +29,7 @@ def estimate(a):
     measured_windows=sum(r['windows'] for r in measured);measured_seconds=sum(r['seconds'] for r in measured)
     unfinished=[r for r in rows if rt.completed(a,r) is None]
     pending_windows=sum(len(ip.px.windows((r['image_height'],r['image_width']))) for r in unfinished)
-    index=st.sealed_json(a.cache_root/'index/manifest.json')
+    index=st.sealed_json(index_root(a)/'manifest.json')
     seconds_per_window=measured_seconds/measured_windows if measured_windows else None
     pending=seconds_per_window*pending_windows if seconds_per_window is not None else None
     done=[r for r in rows if rt.completed(a,r) is not None]

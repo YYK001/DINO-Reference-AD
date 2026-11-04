@@ -11,7 +11,7 @@ import unittest
 import tempfile
 from DINOv3.MADEqual.aebad_s_annular_ordinal_p0 import protocol as p,pixels as px,geometry as g,evidence as ev,inputs as ip,pipeline as pl,runtime as rt
 from DINOv3.MADEqual.aebad_s_annular_ordinal_p0.runner import parser,normalize
-from DINOv3.MADEqual.aebad_s_annular_ordinal_p0.index import Store
+from DINOv3.MADEqual.aebad_s_annular_ordinal_p0.index import Store,source_slices,native_build,index_root
 st=ip.st
 
 def pattern():return np.random.default_rng(128).random((192,192),dtype=np.float32)
@@ -175,6 +175,61 @@ class TestAnnularOrdinal(unittest.TestCase):
         metric=image_metrics([r['label'] for r in x.evaluation],[x.P[r['relative_path']] for r in x.evaluation])
         parent=next(r for r in x.metrics if r['branch']=='SEGMENT_K8' and r['scoring']=='CH1')
         for k,value in metric.items():assert value==float(parent[k])
+
+    def test_source_shards_cover_real_scale_without_large_allocation(self):
+        ranges=source_slices(576542785)
+        assert len(ranges)==5 and ranges[0][0]==0 and ranges[-1][1]==576542785
+        assert all(a[1]==b[0] for a,b in zip(ranges,ranges[1:]))
+        assert all((stop-start)*16<=2**31-1 for start,stop in ranges)
+        huge=np.lib.stride_tricks.as_strided(np.zeros(16,np.uint8),shape=(576542785,16),strides=(0,1))
+        with self.assertRaisesRegex(ValueError,'INT_MAX'):native_build(None,huge)
+
+    def test_source_shard_offsets_and_single_global_match_budget(self):
+        from collections import OrderedDict
+        class Native:
+            def __init__(self,ids,distances):self.ids=ids;self.distances=distances
+            def knnSearch(self,q,k,params):return np.array([self.ids],np.int32),np.array([self.distances],np.int32)
+        store=Store.__new__(Store);store.query_cache=OrderedDict();store.load=lambda:None
+        store.rows=[dict(instance_id='one'),dict(instance_id='two')]
+        store.backend=[dict(name='Source000',kind='Source',rows=20,row_start=0,
+            native=Native(list(range(20)),list(range(40,60))),
+            blocks=[dict(start=0,end=20,ref=0,x0=8,y0=8,nx=20,version=4)]),
+            dict(name='Source001',kind='Source',rows=20,row_start=20,
+            native=Native(list(range(20)),list(range(20))),
+            blocks=[dict(start=10,end=40,ref=1,x0=8,y0=8,nx=10,version=4)])]
+        hits,flag=store.lookup_many(np.zeros((1,16),np.uint8))[0]
+        assert len(hits)==16 and all(h[1]==1 for h in hits) and flag
+        # Local row0 is global row20, ten rows into the original grid block.
+        assert hits[0]==(0,1,8,16,4)
+
+    def test_real_native_sharded_build_load_and_component_resume(self):
+        from collections import OrderedDict
+        values=np.random.default_rng(3).integers(0,256,(6,16),np.uint8)
+        path=self.tmp_path/'descriptors';part=st.put(path,dict(descriptors=values),dict(
+            blocks=[dict(x0=8,y0=8,nx=3,ny=2,count=6,version=4)]))
+        a=SimpleNamespace(cache_root=self.tmp_path/'cache',run_root=self.tmp_path/'run',_identity='id',cpu_workers=1,allow_over_12h=False)
+        store=Store.__new__(Store);store.a=a;store.backend=None;store.query_cache=OrderedDict()
+        store.rows=[dict(index=i,kind='Source' if i<455 else 'Target',instance_id=str(i)) for i in range(463)]
+        store.describe=lambda row:part;store.descriptor_path=lambda row:path
+        # Exercise actual native build/load with tiny synthetic matrices, not RGB or real assets.
+        with patch.dict(p.CONFIG['index'],source_shard_rows=1000):
+            import contextlib,io
+            with contextlib.redirect_stdout(io.StringIO()):record=store.build()
+            source=[group for group in record['groups'] if group['kind']=='Source']
+            assert [(group['row_start'],group['rows']) for group in source]==[(0,1000),(1000,1000),(2000,730)]
+            assert record['reused_descriptor_images']==463 and record['fresh_descriptor_images']==0
+            copied=np.load(index_root(a)/'source_vectors.npy',mmap_mode='r')
+            np.testing.assert_array_equal(copied,np.tile(values,(455,1)));del copied
+            store.load();first=store.lookup_many(values[:1])[0][0]
+            assert sum(h[1]<455 for h in first)==16
+            assert sum(h[1]>=455 for h in first)<=32
+            store.backend=None;store.query_cache.clear();store.load()
+            assert store.lookup_many(values[:1])[0][0]==first
+            (index_root(a)/'manifest.json').unlink()
+            with patch('DINOv3.MADEqual.aebad_s_annular_ordinal_p0.index.native_build',side_effect=AssertionError('completed native shard rebuilt')):
+                with contextlib.redirect_stdout(io.StringIO()):resumed=store.build()
+            assert resumed['groups']==record['groups']
+        store.backend=None
 
     def test_preflight_does_not_import_torch_or_decode_images(self):
         tmp_path=self.tmp_path

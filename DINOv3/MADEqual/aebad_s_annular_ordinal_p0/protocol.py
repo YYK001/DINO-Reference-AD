@@ -22,7 +22,8 @@ CONFIG=dict(version=VERSION,domain='background',support_seed=42,Source_images=45
     gray='float32 (0.299 R + 0.587 G + 0.114 B)/255; pointwise',
     decoding='Pillow RGB, encoded raster orientation; no EXIF transpose, resize, smoothing or padding',
     interpolation='FP32 bilinear; out-of-bounds invalid, zero-weight neighbors not required',
-    index=dict(backend='OpenCV FLANN LSH',approximate=True,algorithm=6,table_number=4,key_size=20,multi_probe_level=1),
+    index=dict(backend='OpenCV FLANN LSH',approximate=True,algorithm=6,table_number=4,key_size=20,multi_probe_level=1,
+        layout='source_sharded_int32_v1',source_shard_rows=(2**31-1)//16,seed_per_native_index=42),
     no_retrieval_completeness_claim=True,training=False,parameter_search=False,new_pixel_jobs=0,new_AUPRO_jobs=0,
     duration_budget_hours=12,smoke_calibration_images=4)
 
