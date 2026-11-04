@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from enum import IntEnum
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -222,6 +223,173 @@ class IndependentMassBasisTests(unittest.TestCase):
             self.assertEqual(binding['acceptance_protocol'],v.PROTOCOL)
             self.assertEqual(binding['actual_settings'],dict(v.settings(),time_limit=300.))
             self.assertFalse((a.output_root/'pairs').exists())
+
+
+class FinalSingleCheckTests(unittest.TestCase):
+    def test_real_adapter_forwards_barrier_without_PDLP_options_or_false_PDLP_tag(self):
+        p,x,y=exact();captured={}
+        class Method(IntEnum):PDLP=1;Barrier=3
+        class Mode(IntEnum):Stable3=4
+        class Settings:
+            def __init__(self):self.values={}
+            def set_parameter(self,k,val):self.values[k]=val
+            def get_parameter(self,k):return self.values.get(k,'auto')
+        class Model:
+            def __getattr__(self,name):return lambda *args:captured.update({name:args})
+        def solve(model,settings):
+            captured['settings']=settings.values
+            return SimpleNamespace(get_solved_by=lambda:Method.Barrier,get_termination_reason=lambda:'Optimal',get_primal_solution=lambda:x,
+                get_dual_solution=lambda:y,get_primal_objective=lambda:p['reference_objective'],get_dual_objective=lambda:p['reference_objective'],
+                get_error_status=lambda:0,get_error_message=lambda:'',get_solve_time=lambda:.01,get_lp_stats=lambda:{'nb_iterations':1})
+        names=set(v.final_settings('PDLP'))|set(v.final_settings('Barrier'))
+        modules={'cuopt':SimpleNamespace(linear_programming=SimpleNamespace(SolverSettings=Settings,DataModel=Model,Solve=solve)),
+            'cuopt.linear_programming.solver_settings.solver_settings':SimpleNamespace(SolverMethod=Method,PDLPSolverMode=Mode),
+            'cuopt.linear_programming.solver':SimpleNamespace(solver_parameters=SimpleNamespace(**{'CUOPT_'+n.upper():n for n in names}))}
+        with patch.dict(sys.modules,modules):
+            adapter=v.gpu.CuOptPDLP(120,7,backend='Barrier',parameters=v.final_settings('Barrier'))
+            result=adapter.solve(v.gpu.sparse_batch([p]))
+        self.assertEqual(result['solved_by'],'Barrier');self.assertFalse(result['GPU_PDLP']);self.assertTrue(result['requested_method_matched'])
+        self.assertEqual(captured['settings']['method'],Method.Barrier)
+        self.assertNotIn('pdlp_precision',captured['settings']);self.assertNotIn('pdlp_solver_mode',captured['settings'])
+        self.assertEqual(captured['set_csr_constraint_matrix'][0].dtype,np.float64)
+        self.assertTrue(v.audit(p,result['primal'],result['dual'],result['status'],result['solved_by'],requested_backend='Barrier')['accepted'])
+
+    def test_requested_barrier_uses_same_mathematics_and_cannot_impersonate_PDLP(self):
+        p,x,y=exact()
+        self.assertTrue(v.audit(p,x,y,'TimeLimit','Barrier',requested_backend='Barrier')['accepted'])
+        self.assertFalse(v.audit(p,x,y,'Optimal','Barrier')['accepted'])
+        self.assertFalse(v.audit(p,x,y,'Optimal','PDLP',requested_backend='Barrier')['accepted'])
+        self.assertFalse(v.audit(p,x,y,'Optimal','DualSimplex',requested_backend='DualSimplex')['accepted'])
+        bad=y.copy();bad[-2:]*=-1
+        r=v.audit(p,x,bad,'Optimal','Barrier',requested_backend='Barrier')
+        self.assertFalse(r['accepted']);self.assertFalse(r['checks']['dual'])
+
+    def test_backend_settings_and_single_matrix_do_not_use_block_diag(self):
+        p,x,y=exact();A=v.final_settings('PDLP');B=v.final_settings('Barrier')
+        self.assertEqual(A['pdlp_precision'],2);self.assertEqual(A['pdlp_solver_mode'],'Stable3')
+        self.assertTrue(A['save_best_primal_solution']);self.assertTrue(A['per_constraint_residual'])
+        self.assertEqual(A['relative_gap_tolerance'],1e-7)
+        self.assertFalse(any(k.startswith('pdlp_') or k=='save_best_primal_solution' for k in B))
+        self.assertEqual(B['method'],'Barrier');self.assertEqual(B['relative_gap_tolerance'],1e-8)
+        for s in (A,B):self.assertEqual(s['time_limit'],120.);self.assertEqual(s['presolve'],2);self.assertFalse(s['crossover'])
+        with patch.object(v.gpu,'block_diag',side_effect=AssertionError('no block diagonal operation allowed')):
+            b=v.gpu.sparse_batch([p])
+        self.assertEqual(len(b['slices']),1);self.assertEqual(b['matrix'].shape,(6,5))
+
+    def exercise(self,outcomes,durations=None,over_budget=False,names=None):
+        p,x,y=exact();ps=[dict(p,id=(names or [f'{i:02d}' for i in range(16)])[i]) for i in range(16)]
+        calls=[];durations=durations or {'PDLP':2.,'Barrier':1.}
+        def single(a,index,problem,backend,*_):
+            calls.append((index,backend));good=outcomes(backend,index)
+            check=v.audit(p,x,y,'TimeLimit',backend,requested_backend=backend);check['accepted']=good
+            return dict(request=dict(id=problem['id'],index=index,requested_backend=backend),audit=check,
+                end_to_end_seconds=durations[backend],timing={},resource={},solver={},error=None)
+        def cost(a,manifest,problems,records,backend):
+            return dict(backend=backend,exceeds_12h=over_budget,known_pending_seconds=13*3600 if over_budget else 100.,unknown_stages=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);a=SimpleNamespace(problem_root=root/'old',output_root=root/'new',inventory_run=root/'inventory',coverage_parent=root/'parent',cpu_workers=7,allow_over_12h=False)
+            ph.st.write_json(a.inventory_run/'inventory.json',{'fixture':'inventory'})
+            with patch.object(v.gpu,'load_problems',return_value=(dict(seal='original16'),ps)),patch.object(v,'final_single',side_effect=single),patch.object(v,'final_cost',side_effect=cost):
+                result=v.final_check(a,resource_reader=lambda:{})
+            rows=ip.csv_rows(a.output_root/'final_checks.csv');first=ip.csv_rows(a.output_root/'stage1_four_cases.csv')
+            note=(a.output_root/'section51_append.md').read_text(encoding='utf-8')
+            self.assertEqual(len(first),4);self.assertEqual(len(rows),len(calls))
+            self.assertEqual(result['formal_LPs_started'],0);self.assertEqual(result['feature_forwards'],0)
+            self.assertFalse((a.output_root/'predictions_frozen.json').exists());self.assertIn('第51节',note)
+        return result,calls
+
+    def test_neither_two_of_two_stops_at_four(self):
+        r,calls=self.exercise(lambda b,i:(b=='PDLP' and i==0) or (b=='Barrier' and i==8))
+        self.assertEqual(calls,[(0,'PDLP'),(0,'Barrier'),(8,'PDLP'),(8,'Barrier')])
+        self.assertEqual(r['status'],'closed_unreliable');self.assertFalse(r['complete_16'])
+        self.assertEqual(r['remaining14_status'],'not_requested')
+        self.assertEqual(r['conclusion'],'当前求解路径未能在可接受成本下可靠完成，尚未取得正式检测结果。')
+
+    def test_only_one_qualified_backend_extends_exactly_fourteen(self):
+        r,calls=self.exercise(lambda b,i:b=='Barrier')
+        self.assertEqual(len(calls),18);self.assertEqual(sum(b=='PDLP' for i,b in calls),2)
+        self.assertEqual({i for i,b in calls if b=='Barrier'},set(range(16)))
+        self.assertTrue(r['complete_16']);self.assertEqual(r['selected_backend'],'Barrier')
+
+    def test_both_pass_choose_total_end_to_end_time(self):
+        r,calls=self.exercise(lambda b,i:True,{'PDLP':1.,'Barrier':2.})
+        self.assertEqual(r['selected_backend'],'PDLP');self.assertEqual(len(calls),18)
+        self.assertEqual(r['stage1_backend_complete_seconds'],{'PDLP':2.,'Barrier':4.})
+
+    def test_remaining_failure_closes_without_switch_or_retry(self):
+        r,calls=self.exercise(lambda b,i:b=='Barrier' and i!=3)
+        self.assertEqual(len(calls),18);self.assertEqual(len(set(calls)),18)
+        self.assertEqual(sum(b=='PDLP' for i,b in calls),2);self.assertEqual(r['status'],'closed_unreliable')
+
+    def test_cost_over_twelve_hours_stops_before_extension(self):
+        r,calls=self.exercise(lambda b,i:True,over_budget=True)
+        self.assertEqual(len(calls),4);self.assertEqual(r['status'],'stopped_cost_over_12h')
+
+    def test_nonstandard_ids_still_use_first_and_ninth(self):
+        r,calls=self.exercise(lambda b,i:False,names=['original_'+str(i) for i in range(16)])
+        self.assertEqual([i for i,b in calls],[0,0,8,8])
+
+    def test_single_case_resume_failed_case_and_interrupted_slot_never_resolve(self):
+        p,x,y=exact();p['id']='00';created=[]
+        class Adapter:
+            def __init__(self,*args,backend,parameters):
+                self.backend=backend;self.effective_settings=parameters
+                self.settings=SimpleNamespace(set_parameter=lambda *args:None)
+            def solve(self,batch):
+                created.append(self.backend)
+                return dict(primal=x,dual=y,status='TimeLimit',solved_by=self.backend,error_status=0,
+                    objective=p['reference_objective'],reported_dual_objective=p['reference_objective'],model_seconds=.001,solve_call_seconds=.02,engine_seconds=.01)
+        modules={'cuopt.linear_programming.solver':SimpleNamespace(solver_parameters=SimpleNamespace(CUOPT_LOG_FILE='log_file'))}
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(sys.modules,modules):
+            a=SimpleNamespace(output_root=Path(tmp),cpu_workers=7,_final_identity='fixture');adapters={}
+            with patch.object(v.gpu,'block_diag',side_effect=AssertionError('single only')):
+                first=v.final_single(a,0,p,'Barrier',adapters,Adapter,lambda:{'RSS':123})
+                second=v.final_single(a,0,p,'Barrier',adapters,Adapter,lambda:{})
+            self.assertTrue(first['audit']['accepted']);self.assertEqual(created,['Barrier'])
+            self.assertEqual(first['end_to_end_seconds'],second['end_to_end_seconds'])
+            with patch.object(v.gpu.st,'put',side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):v.final_single(a,8,p,'Barrier',adapters,Adapter,lambda:{})
+            interrupted=v.final_single(a,8,p,'Barrier',adapters,Adapter,lambda:{})
+            self.assertFalse(interrupted['audit']['accepted']);self.assertEqual(interrupted['audit']['stop_reason'],'interrupted')
+            self.assertEqual(created,['Barrier','Barrier'])
+
+    def test_cost_uses_real_single_times_including_failures_and_deduplicates_reuse(self):
+        p,x,y=exact();refs=[dict(id=f'{i:02d}') for i in range(16)]
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);a=SimpleNamespace(problem_root=root/'old',inventory_run=root/'inventory',coverage_parent=root/'parent')
+            ph.st.write_json(a.inventory_run/'inventory.json',dict(plan=dict(LPs=2840),remaining_regions=2,missing_feature_images=1,missing_distance_matrices=4))
+            ph.st.write_json(a.inventory_run/'preflight_inputs.json',dict(parent='original'))
+            for ref in refs:
+                ph.st.sealed_json(a.problem_root/'problems'/ref['id']/'manifest.json',dict(metadata=dict(query={},template={},distance_seconds=.5,
+                    dependencies=dict(query='q',template='t',RMS='r',distance_device='cuda:0'))))
+            manifest=dict(parent_inputs='original',problems=refs,original_estimate=dict(region_seconds=20.,remaining_unique_region_images=2,
+                missing_feature_seconds=30.,missing_feature_images=3,matching_distance_LP_IO_seconds=999999.))
+            records=[dict(request=dict(requested_backend='Barrier',index=i),audit=dict(accepted=i==0),end_to_end_seconds=t) for i,t in ((0,120.),(8,1.))]
+            with patch.object(mr,'strict_cpu',return_value={'backend':'HiGHS'}) as reused:
+                cost=v.final_cost(a,manifest,[],records,'Barrier');v.final_cost(a,manifest,[],records,'PDLP')
+            self.assertEqual(reused.call_count,16);self.assertEqual(cost['remaining_LPs'],2824)
+            self.assertEqual(cost['LP_seconds_per_case_including_failures_and_initialization'],60.5)
+            parts=cost['parts_seconds'];self.assertEqual(parts['region_preparation'],20.)
+            self.assertEqual(parts['missing_feature_forward'],10.);self.assertEqual(parts['missing_distance_compute_commit'],2.)
+            self.assertEqual(parts['single_LP_build_transfer_solve_audit_commit'],2824*60.5)
+            self.assertTrue(cost['exceeds_12h'])
+
+    def test_final_entry_refuses_to_append_to_unrelated_historical_output(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.dict('os.environ',{'CUDA_VISIBLE_DEVICES':'1'}):
+            root=Path(tmp);ph.st.write_json(root/'history/summary.json',{'old':True})
+            with self.assertRaisesRegex(ValueError,'historical outputs'):
+                v.main(['--final-check','--problem-root',str(root/'inputs'),'--output-root',str(root/'history'),
+                    '--inventory-run',str(root/'inventory'),'--coverage-parent',str(root/'parent')])
+
+    def test_initialization_failure_is_committed_and_not_retried_on_resume(self):
+        p,x,y=exact();p['id']='00';attempts=[]
+        def unavailable(*args,**kwargs):attempts.append(1);raise ImportError('fixture backend unavailable')
+        with tempfile.TemporaryDirectory() as tmp:
+            a=SimpleNamespace(output_root=Path(tmp),cpu_workers=7,_final_identity='failure_fixture');adapters={}
+            first=v.final_single(a,0,p,'Barrier',adapters,unavailable,lambda:{})
+            second=v.final_single(a,0,p,'Barrier',{},unavailable,lambda:{})
+            self.assertFalse(first['audit']['accepted']);self.assertFalse(second['audit']['accepted'])
+            self.assertEqual(attempts,[1]);self.assertIn('fixture backend unavailable',first['error'])
 
 
 class ScopeAndReuseTests(unittest.TestCase):

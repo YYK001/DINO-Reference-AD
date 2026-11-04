@@ -35,23 +35,37 @@ def sparse_batch(problems):
         rhs.append(np.r_[e,u]);senses.extend(['E']*len(e)+['L']*len(u))
         objective=np.zeros(d.size+1);objective[-1]=1.;objectives.append(objective)
         slices.append((offset,offset+d.size+1));offset+=d.size+1
-    return dict(matrix=block_diag(matrices,format='csr'),rhs=np.concatenate(rhs),
+    return dict(matrix=matrices[0] if len(matrices)==1 else block_diag(matrices,format='csr'),rhs=np.concatenate(rhs),
         senses=np.array(senses),objective=np.concatenate(objectives),slices=slices)
 
 
 class CuOptPDLP:
-    """Stock sparse cuOpt API. Explicit precision, no implicit crossover/fallback."""
-    def __init__(self,time_limit=30.,cpu_workers=8,precision='fp32'):
+    """Shared stock cuOpt adapter; explicit backend, no crossover/fallback."""
+    def __init__(self,time_limit=30.,cpu_workers=8,precision='fp32',backend='PDLP',parameters=None):
         # Official mode 0 uses FP32 iterations; mode 2 uses FP32 SpMV matrices
         # with FP64 vectors and convergence checks. Original inputs stay FP64.
         from cuopt import linear_programming as lp
         from cuopt.linear_programming.solver_settings.solver_settings import SolverMethod,PDLPSolverMode
         from cuopt.linear_programming.solver import solver_parameters as keys
-        self.lp=lp;self.method=SolverMethod.PDLP;self.settings=lp.SolverSettings()
-        self.parameters=settings_values(time_limit,cpu_workers,precision)
+        if backend not in ('PDLP','Barrier'):raise ValueError('explicit PDLP or Barrier required')
+        self.lp=lp;self.method=getattr(SolverMethod,backend);self.pdlp_method=SolverMethod.PDLP;self.settings=lp.SolverSettings()
+        self.parameters=dict(parameters) if parameters is not None else settings_values(time_limit,cpu_workers,precision)
+        if self.parameters['method']!=backend:raise ValueError('requested method/settings mismatch')
+        if backend=='Barrier' and any(k.startswith('pdlp_') or k=='save_best_primal_solution' for k in self.parameters):
+            raise ValueError('PDLP settings must not be applied to Barrier')
         for name,value in self.parameters.items():
             value=self.method if name=='method' else PDLPSolverMode.Stable3 if name=='pdlp_solver_mode' else value
             self.settings.set_parameter(getattr(keys,'CUOPT_'+name.upper()),value)
+        self.effective_settings={}
+        if parameters is not None:
+            names=list(self.parameters)
+            if backend=='Barrier':names+=['ordering','dualize','folding','augmented','eliminate_dense_columns',
+                'barrier_primal_regularization','barrier_dual_regularization','barrier_iterative_refinement',
+                'cudss_deterministic','barrier_dual_initial_point','barrier_initial_point_safeguard',
+                'barrier_step_scale','barrier_adaptive_regularization','barrier_presolve_bound_free_variables','sequence_solve']
+            for name in names:
+                key=getattr(keys,'CUOPT_'+name.upper(),None)
+                self.effective_settings[name]=self.settings.get_parameter(key) if key is not None else 'not exposed by installed version; not set'
 
     def solve(self,batch):
         tick=time.perf_counter();model=self.lp.DataModel();matrix=batch['matrix']
@@ -71,7 +85,8 @@ class CuOptPDLP:
         return dict(primal=np.asarray(solution.get_primal_solution(),np.float64),
             dual=np.asarray(dual,np.float64) if dual is not None else np.array([],np.float64),
             objective=float(solution.get_primal_objective()),status=status,
-            solver_optimal=status.lower()=='optimal',GPU_PDLP=solved_by==self.method,
+            solver_optimal=status.lower()=='optimal',GPU_PDLP=solved_by==self.pdlp_method,
+            requested_method_matched=solved_by==self.method,
             solved_by=getattr(solved_by,'name',str(solved_by)),model_seconds=build,
             solve_call_seconds=time.perf_counter()-tick,engine_seconds=float(solution.get_solve_time()),
             reported_dual_objective=float(solution.get_dual_objective()) if hasattr(solution,'get_dual_objective') else None,
@@ -256,7 +271,8 @@ def finite_record(value):
 
 def packages():
     out={}
-    for name in ('numpy','scipy','cuopt','cuopt-cu13','cuopt-cu12','libcuopt-cu13','libcuopt-mathopt-cu13','librmm-cu13','cuda-bindings'):
+    for name in ('numpy','scipy','cuopt','cuopt-cu13','cuopt-cu12','libcuopt-cu13','libcuopt-mathopt-cu13','librmm-cu13',
+                 'cuda-bindings','nvidia-cudss-cu13','nvidia-cuda-runtime'):
         try:out[name]=version(name)
         except PackageNotFoundError:out[name]=None
     return out

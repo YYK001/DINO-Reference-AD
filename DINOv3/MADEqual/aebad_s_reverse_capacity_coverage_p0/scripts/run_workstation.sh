@@ -6,7 +6,7 @@ PY=${PYTHON:-$work/conda_envs/yyk/bin/python}
 stage=${1:-preflight}
 if [ "$#" -gt 0 ]; then shift; fi
 profile=${LP_PROFILE:-mixed_background_v2}
-tag=${RUN_TAG:-aebad_reverse_capacity_background_v2}
+if [ "$stage" = final-check ]; then tag=${RUN_TAG:-aebad_reverse_capacity_final_single_v1};else tag=${RUN_TAG:-aebad_reverse_capacity_background_v2};fi
 run=${RUN_ROOT:-$work/runs/$tag}
 cache=${CACHE_ROOT:-$work/storage/reverse_capacity_cache/$tag}
 device=${DEVICE:-cpu}
@@ -19,6 +19,24 @@ export XDG_CACHE_HOME="$work/.cache" TMPDIR="$work/tmp" MPLBACKEND=Agg
 export CUDA_CACHE_PATH="$work/.cache/cuda" CUPY_CACHE_DIR="$work/.cache/cupy" NUMBA_CACHE_DIR="$work/.cache/numba"
 mkdir -p "$work/runs" "$work/tmp" "$work/.cache" "$CUDA_CACHE_PATH" "$CUPY_CACHE_DIR" "$NUMBA_CACHE_DIR"
 cd "$repo"
+if [ "$stage" = final-check ]; then
+  coverage_parent=${COVERAGE_PARENT:-$(cat "$work/runs/latest_reverse_capacity_run.txt")}
+  inventory_run="${run}_assets"
+  printf 'STAGE=existing-asset-inventory LOG=%s\n' "${inventory_run}_launcher.log"
+  if [ ! -f "$inventory_run/inventory.json" ]; then
+    if RUN_ROOT="$inventory_run" CACHE_ROOT="${cache}_assets" LP_PROFILE=mixed_background_v2 \
+      bash "$0" preflight > "${inventory_run}_launcher.log" 2>&1;then :
+    else
+      rc=$?
+      if [ "$rc" -ne 2 ] || [ ! -f "$inventory_run/inventory.json" ];then cat "${inventory_run}_launcher.log";exit "$rc";fi
+    fi
+  fi
+  printf 'STAGE=final-single-check OUTPUT=%s\n' "$run"
+  exec "${LP_PYTHON:-$work/conda_envs/yyk_lp/bin/python}" -B -u \
+    -m DINOv3.MADEqual.aebad_s_reverse_capacity_coverage_p0.lp_v2 \
+    --final-check --problem-root "${DISTANCE_EXPORT:-${coverage_parent}_gpu_lp_fp32}" \
+    --output-root "$run" --inventory-run "$inventory_run" --coverage-parent "$coverage_parent" "$@"
+fi
 extra=()
 if [ "$profile" = mixed_background_v2 ]; then
   coverage_parent=${COVERAGE_PARENT:-$(cat "$work/runs/latest_reverse_capacity_run.txt")}

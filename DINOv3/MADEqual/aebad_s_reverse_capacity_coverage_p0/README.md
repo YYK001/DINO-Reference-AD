@@ -1,5 +1,50 @@
 # 面积容量约束的反向覆盖：固定配置
 
+## 最后一轮：单题PDLP mixed与GPU Barrier（当前入口）
+
+本轮只运行 `final-check`，不运行下方历史 `all` 或坐标改造试验。原16项距离/面积和封存CPU参考只读复用；不提取特征、不重建区域/距离、不生成检测分数。复用本模块gpu_lp的cuOpt适配器、sparse_batch的单题直接路径、lp_v2.audit及已有preflight/资源记录，未新增另一套求解工具或数值算法。单题直接构造原768条约束，绕开block_diag；不缩放变量或手工删行。
+
+- 固定先测试原00、08（其他编号格式取manifest第1/9题），顺序为00/PDLP、00/Barrier、08/PDLP、08/Barrier，串行、无额外暖机。
+- PDLP：mixed=2、Stable3、save_best_primal_solution=true、crossover=false、逐约束残差、六项停止阈值1e-7。保存最佳原始候选不替代对偶/gap验收。
+- Barrier：显式SolverMethod.Barrier，原FP64系数输入，使用原生默认精度与算法；不传PDLP精度/模式/保存候选参数。六项通用停止阈值显式固定1e-8，其余ordering、dualize、folding、正则等只记录安装版本默认值，不调参。
+- 两者均单GPU、最多7个solver线程+主线程、关闭crossover、标准PSLP presolve=2固定，每次120秒。4次名义时限合计8分钟，初始化/传输/验收/落盘另计，可能略超库的时限检查点，不承诺8分钟结束。接口依据见[NVIDIA设置文档](https://docs.nvidia.com/cuopt/user-guide/latest/convex-settings.html)。
+- audit使用本次requested_backend核对真实solved_by。Barrier不伪装成PDLP；全部原系数下的行和、逐列相对容量、目标一致性、CPU目标差、非负性、对偶符号/reduced cost和gap沿用v2。Optimal/TimeLimit均须独立通过；后者明确是超时数值通过的近似解，不称Optimal。额外核对求解器报告目标与原始/对偶返回向量的重算一致性。所有向量保留，不裁剪/归一化/修复。
+- 两后端都未达到2/2，立即收束。至少一个2/2才有资格扩展；都通过时按两题完整耗时之和择快，保留先后顺序和冷启动影响。选定后只补14题，不切换后端、不自动重试，总计最多18个调用槽位。
+- 扩展前使用原工具的background/seed42资产盘点、历史真实准备吞吐和当前单题端到端耗时估计剩余成本。RMS、已完成区域/距离和已核对的严格CPU结果不重复计入待办。失败/超时也进入耗时均值；显式初始化只计一次，未知项不填0。已知待执行超过12小时就暂停；只有用户明确同意后手动传`--allow-over-12h`才可补14题，该选项也不会启动正式2840项。
+- 选定后端的16题如仍有失败，收束本方案，不再追加求解器、精度、模式、缩放等挽救试验。即使16题通过，也只汇报精度和成本，等待正式运行决定；**旧all仍为旧拼批PDLP路径，不能因为本核查通过而直接启动它**。
+
+### 手动后台入口
+
+默认脚本阶段仍为preflight。下面显式final-check在已有tmux启动器中运行；默认固定输出目录便于中断后复用，不自动创建新一轮。没有安装、升级、关机或服务器连接动作。
+
+```bash
+cd /home/ubun/YYK/DINO-Reference-AD
+GPU_INDEX=1 CPU_WORKERS=8 \
+  bash DINOv3/MADEqual/aebad_s_reverse_capacity_coverage_p0/scripts/run_phase1_tmux.sh final-check
+```
+
+默认输出`/home/ubun/YYK/runs/aebad_reverse_capacity_final_single_v1`。启动器先复用现有preflight生成一次相邻的`_assets`盘点（仅元数据，不补资产），已存在盘点就复用。随后在独立yyk_lp中完成有限核查；原yyk/base不修改。所有新文件和第三方缓存留在YYK范围。
+
+调用前预留attempt，结果逐题保存。中断后相同入口复用成功或失败记录，不重复求解；若仅留attempt而无完整结果，标为中断未完成，不占用新的重试机会。单进程flock防止同一目录重复后台执行；最多18个槽位不会因重启而被重置。历史输出/cache只读，不删除资产。
+
+### 本轮交付
+
+- `stage1_four_cases.csv`：原4次单题比较；`remaining14.csv`：获准扩展的14题，否则为not_requested。
+- `final_checks.csv`：编号、请求/实际后端、原停止状态、原始/对偶可行性、归一化gap、CPU目标差、是否通过、完整耗时和各误差。
+- `cases/<backend_index>/`：attempt、原始primal/dual、实际设置/精度声明、完整solver日志、停止原因/迭代/时间、RSS及GPU驻留采样、结果和端到端cost。GPU驻留采样不冒充瞬时峰值。
+- `final_summary.json/cost_estimate.csv/objective_report.md`：两阶段结果、后端选择、成本计算与资产/测量来源、冷启动、未知项、未启动正式任务的状态。
+- `section51_append.md`：可追加至窗口第51节的客观短文。
+
+计时分列Python/solver初始化、稀疏矩阵和DataModel构造、Solve调用及库报告引擎时间、原系数验收/证明包落盘。Solve调用减引擎时间仅标API/传输等额外开销，不冒充纯H2D；这些时间有包含关系，不能重复相加。端到端计入结果落盘，仅最后计时元数据自身写入不计；解释器启动未直接测量写NA。
+
+若本轮无法可靠或经济完成，统一收束文字为：**“当前求解路径未能在可接受成本下可靠完成，尚未取得正式检测结果。”** 不写成AUROC/AP失败，不否定容量约束思想或第二章研究任务。
+
+本地CPU验证：87项完整回归通过（52.661秒），新增初始化异常续跑检查后13项针对性测试通过（0.766秒），合计88项不同测试通过；Bash语法及假Python/tmux启动夹具通过。没有真实CUDA、PDLP或Barrier结果；CPU夹具只检查数学与控制逻辑，不能当成GPU通过表。
+
+本轮新增检查完整清单：原16题小manifest/CPU来源（沿用）、请求后端与实际方法一致、报告目标与向量一致、固定配置/调用记录、独立输出目录及单进程锁。没有增加大数组全量SHA、资源容量准入或新一轮特征检查；实际输入/原系数验收沿用现有代码。
+
+以下保留历史实现说明，本轮不自动执行。
+
 **当前新建运行默认使用工作站脚本的 `LP_PROFILE=mixed_background_v2`，只执行background/seed42。** 下方原六设置CPU协议与早期GPU试验作为历史实现说明保留；本轮运行以本节新版协议为准。直接Python CLI默认仍保留旧 `cpu_v1`，新阶段须显式传 `--lp-profile mixed_background_v2`，旧目录不会被迁移或覆盖。
 
 ## 当前阶段：background / seed42，capacity_LP_mixed_v2
