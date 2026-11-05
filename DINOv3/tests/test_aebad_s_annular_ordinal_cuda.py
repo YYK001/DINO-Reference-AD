@@ -101,6 +101,33 @@ print(json.dumps(dict(identity=r['identity'],visibility=r['execution']['visible_
         a,av=cp.sample(self.gray,points);b,bv=px.sample(self.t,torch.from_numpy(points))
         np.testing.assert_array_equal(a,b.numpy());np.testing.assert_array_equal(av,bv.numpy())
 
+    def test_cpu_scalar_cuda_division_shortcut_regression(self):
+        # Emulate the documented CUDA CPU-scalar branch while running only CPU.
+        original=torch.Tensor.__truediv__
+        def cuda_scalar_shortcut(value,divisor):
+            if isinstance(divisor,(int,float)):return value*float(np.float32(1./divisor))
+            assert divisor.device==value.device and divisor.dtype==value.dtype
+            return original(value,divisor)
+        rng=np.random.default_rng(128);rng.random((192,192),dtype=np.float32)
+        rgb=rng.integers(0,256,(24,32,3),np.uint8);a=rgb.astype(np.float32)
+        numerator=a[...,0]*np.float32(.299)+a[...,1]*np.float32(.587)+a[...,2]*np.float32(.114)
+        assert np.count_nonzero(numerator/np.float32(255)!=numerator*np.float32(1./255))==531
+        with patch.object(torch.Tensor,'__truediv__',new=cuda_scalar_shortcut):
+            np.testing.assert_array_equal(cp.grayscale(rgb),px.grayscale(torch.from_numpy(rgb)).numpy())
+            for divisor in (9.,24.,255.):
+                values=rng.random(256,dtype=np.float32)*np.float32(divisor)
+                np.testing.assert_array_equal(values/np.float32(divisor),px.divide_by_constant(torch.from_numpy(values),divisor).numpy())
+            # Exercise the actual evidence path under the emulated scalar shortcut.
+            refs=self.refs();pool=self.pool();item=dict(source=pool,multi=pool,single=dict(candidates=pool['candidates'][:1],search_unresolved=False))
+            normal=ee.normal_expectations([item],refs,[(64,64)],lambda i:self.t,'cpu')
+            changed=self.gray.copy();changed[64:128:3,64:128:5]=1-changed[64:128:3,64:128:5]
+            result=ee.query_evidence(torch.from_numpy(changed),normal,[(64,64)])
+            for k,name in enumerate(('source','single','multi')):
+                expected=ce.query_evidence(changed,ce.normal_expectation(item[name],refs,(64,64),multi=name!='single'),(64,64))
+                np.testing.assert_array_equal(expected['evidence'],result['evidence'][0,k].numpy())
+                np.testing.assert_array_equal(expected['flip_counts'],result['flip_counts'][0,k].numpy())
+                assert expected['score']==float(result['scores'][0,k])
+
     def test_gpu_sampler_never_reads_rejected_query_center_support(self):
         original=px.sample
         def checked(gray,points):

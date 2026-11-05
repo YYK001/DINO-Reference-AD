@@ -3,9 +3,13 @@ import numpy as np
 import torch
 from .protocol import PAIRS,OUTER_PAIRS,version_offsets
 
+def divide_by_constant(value,divisor):
+    """Device denominator avoids CUDA's CPU-scalar reciprocal-multiply shortcut."""
+    return value/value.new_full((),divisor)
+
 def grayscale(rgb):
     a=rgb.to(torch.float32)
-    return (a[...,0]*.299+a[...,1]*.587+a[...,2]*.114)/255.
+    return divide_by_constant(a[...,0]*.299+a[...,1]*.587+a[...,2]*.114,255.)
 
 def support(points,shape):
     p=points.to(torch.float32);h,w=shape

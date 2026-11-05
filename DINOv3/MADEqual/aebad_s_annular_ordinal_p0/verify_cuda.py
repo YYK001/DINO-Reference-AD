@@ -18,6 +18,10 @@ def fingerprint(device):
 def small_checks(device):
     rng=np.random.default_rng(128);gray=rng.random((192,192),dtype=np.float32);tensor=torch.as_tensor(gray,device=device)
     rgb=rng.integers(0,256,(24,32,3),np.uint8);np.testing.assert_array_equal(cpu.grayscale(rgb),px.grayscale(torch.as_tensor(rgb,device=device)).cpu().numpy())
+    counts=np.arange(25,dtype=np.float32)
+    np.testing.assert_array_equal(counts/np.float32(24),px.divide_by_constant(torch.as_tensor(counts,device=device),24.).cpu().numpy())
+    sums=rng.random(256,dtype=np.float32)*np.float32(9)
+    np.testing.assert_array_equal(sums/np.float32(9),px.divide_by_constant(torch.as_tensor(sums,device=device),9.).cpu().numpy())
     boxes=[(0,0),(64,64),(128,128)];infos=px.outer_to_host(px.outer_batch(tensor,boxes))
     for box,info in zip(boxes,infos):
         old=cg.prepare_outer(gray,box)
@@ -54,14 +58,15 @@ def small_checks(device):
     changed=gray.copy();changed[64:128,64:128]=1-changed[64:128,64:128]
     altered=torch.as_tensor(changed,device=device);after=px.outer_to_host(px.outer_batch(altered,[box]))[0]
     for key in ('points','bits','validation_bits'):np.testing.assert_array_equal(info[key],after[key])
-    for image in (gray,changed):
+    sparse=gray.copy();sparse[64:128:3,64:128:5]=1-sparse[64:128:3,64:128:5]
+    for image in (gray,changed,sparse):
         result=ev.query_evidence(torch.as_tensor(image,device=device),normal,[box])
         for i,name in enumerate(('source','single','multi')):
             prediction=ce.normal_expectation(new[name],ref,box,multi=name!='single');expected=ce.query_evidence(image,prediction,box)
             np.testing.assert_array_equal(prediction['agreed'],normal['agreed'][0,i].cpu().numpy(),err_msg='valid mask')
             np.testing.assert_array_equal(expected['flip_counts'],result['flip_counts'][0,i].cpu().numpy(),err_msg='ordinal flips')
             assert expected['score']==float(result['scores'][0,i].cpu()),'final E differs'
-    return dict(descriptor_bits='exact',Hamming='integer exact',geometry='same candidate counts; T atol1e-10',
+    return dict(grayscale_and_constant_division='exact; device denominator',descriptor_bits='exact',Hamming='integer exact',geometry='same candidate counts; T atol1e-10',
         masks_and_flips='exact',final_E='exact',center_isolation=True,bucket_tail_not_clipped=True,
         scope='fixed synthetic small inputs, not real detection effectiveness or full-scale throughput')
 

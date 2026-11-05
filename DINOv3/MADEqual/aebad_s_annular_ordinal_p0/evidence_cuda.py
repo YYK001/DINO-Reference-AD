@@ -54,11 +54,11 @@ def query_evidence(gray,normal,boxes):
     other=centers[:,neighbor[...,1].clamp(0,63),neighbor[...,0].clamp(0,63)]
     bits=other>centers[:,None]
     count=(normal['agreed']&inside[None,None]&((bits[:,None])!=normal['expected'])).sum(2).to(torch.uint8)
-    e=count.float()/24.;valid=normal['agreed'].any(2)
+    e=px.divide_by_constant(count.float(),24.);valid=normal['agreed'].any(2)
     blocks=torch.zeros((n,3,62,62),device=device);valid_blocks=torch.ones_like(blocks,dtype=torch.bool)
     for dy in range(3):
         for dx in range(3):blocks=blocks+e[:,:,dy:dy+62,dx:dx+62];valid_blocks &= valid[:,:,dy:dy+62,dx:dx+62]
-    blocks=blocks/9.;score=torch.where(valid_blocks,blocks,torch.zeros_like(blocks)).flatten(2).amax(2)
+    blocks=px.divide_by_constant(blocks,9.);score=torch.where(valid_blocks,blocks,torch.zeros_like(blocks)).flatten(2).amax(2)
     return dict(scores=score,evidence_present=valid_blocks.flatten(2).any(2),valid_blocks=valid_blocks.sum((2,3)),
         flip_counts=count,missing_mask_packed=px.packbits((~normal['agreed']).flatten(2)),
         agreement_fraction=normal['agreed'].double().mean((2,3,4)).float(),
