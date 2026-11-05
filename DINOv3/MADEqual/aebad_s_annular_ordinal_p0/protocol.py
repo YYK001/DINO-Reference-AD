@@ -1,5 +1,7 @@
 """All methodological choices are frozen before any image metric is read."""
 import numpy as np
+from functools import lru_cache
+import os
 
 VERSION='annular_ordinal_v1'
 BASE='SEGMENT_CH1';SOURCE='SOURCE_MULTI_FUSION';SINGLE='ST_SINGLE_FUSION';PRIMARY='ST_MULTI_FUSION'
@@ -53,3 +55,20 @@ def version_matrix(version):
 def version_offsets(version):return PAIRS.astype(np.float32)@version_matrix(version).T
 
 def fixed():return dict(CONFIG,descriptor_pairs=PAIRS.tolist(),outer_pixel_pairs=OUTER_PAIRS.tolist(),comparison_offsets=OFFSETS.tolist())
+
+@lru_cache(maxsize=1)
+def cuda_index_config():
+    r=np.random.default_rng(42)
+    return dict(backend='torch_binary_CSR_LSH_v1',approximate=True,table_number=4,key_size=20,multi_probe_level=1,
+        seed=42,bit_positions=[r.choice(128,20,replace=False).tolist() for _ in range(4)],
+        bucket_truncation=False,rerank='integer Hamming, physical dedup, deterministic global Top-k',
+        OpenCV_candidate_equivalence=False)
+
+def execution(a):
+    backend=getattr(a,'backend','cpu')
+    if backend=='cpu':return dict(backend='cpu',retrieval=CONFIG['index'],storage='dense_npz_v1')
+    return dict(backend='cuda',device=a.device,visible_devices=os.environ.get('CUDA_VISIBLE_DEVICES','not-set'),retrieval=cuda_index_config(),storage='sparse_lossless_v1',
+        precision='FP32 pixels/sampling; integer descriptors/counts; batched FP64 small geometry',
+        custom_Triton=False,parameters={name:getattr(a,name) for name in (
+            'window_batch','index_shard_rows','candidate_tile','index_cache_gib','image_cache_gib',
+            'geometry_groups','hypothesis_batch','writer_depth','prefetch_depth')})

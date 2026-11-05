@@ -321,7 +321,12 @@ class TestAnnularOrdinal(unittest.TestCase):
         with zipfile.ZipFile(path) as archive:member=archive.getinfo('flip_counts.npy')
         offset=member.header_offset
         start=offset+30+int.from_bytes(payload[offset+26:offset+28],'little')+int.from_bytes(payload[offset+28:offset+30],'little')
+        previous=path.stat().st_mtime_ns
         payload[start+member.compress_size//2]^=1;path.write_bytes(payload)
+        # Make the fixture's changed-file state observable even on coarse-time
+        # Windows filesystems; stat caching does not claim same-stamp tamper detection.
+        import os
+        os.utime(path,ns=(previous+1_000_000_000,previous+1_000_000_000))
         with self.assertRaisesRegex(ValueError,'committed window NPZ invalid'):
             rt.validate_chunk(a,directory,dict(record,array_bytes=size))
         # Matching the recorded size alone is insufficient even for a ZIP-looking file.

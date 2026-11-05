@@ -1,5 +1,6 @@
 """One fixed population, one calibration and a gate before full computation."""
 import time
+import json
 import numpy as np
 from . import inputs as ip,runtime as rt
 from .protocol import BASE,FUSIONS,E_NAMES,BRANCHES,CONFIG
@@ -26,23 +27,35 @@ def scores(P,E,calibration):
 def estimate(a):
     x=ip.assets(a);rows=x.rows('calibration')+x.rows('evaluation')
     smoke=st.sealed_json(a.run_root/'smoke.json');measured=smoke['images']
-    measured_windows=sum(r['windows'] for r in measured);measured_seconds=sum(r['seconds'] for r in measured)
-    unfinished=[r for r in rows if rt.completed(a,r) is None]
+    timed=[r for r in measured if r.get('whole_image_timing_complete',True)]
+    # Separate the first cold image from subsequent warm images; never count
+    # overlapping chunk/task durations as independent whole-image wall time.
+    warm=timed[1:] if len(timed)>1 else timed
+    measured_windows=sum(r['windows'] for r in warm);measured_seconds=sum(r['seconds'] for r in warm)
+    storage_windows=sum(r['windows'] for r in measured)
+    states=[(r,rt.completed(a,r)) for r in rows]
+    unfinished=[r for r,done in states if done is None]
     pending_windows=sum(len(ip.px.windows((r['image_height'],r['image_width']))) for r in unfinished)
     index=st.sealed_json(index_root(a)/'manifest.json')
+    attempts=a.run_root/'index_preparation_attempts.json'
+    prepared=sum(r['seconds'] for r in json.loads(attempts.read_text(encoding='utf-8'))) if attempts.exists() else index['seconds']
+    check=st.sealed_json(a.run_root/'gpu_check.json') if getattr(a,'backend','cpu')=='cuda' else None
+    initialization=(check['seconds']+check['observed_engine_startup_seconds']) if check and check.get('observed_engine_startup_seconds') is not None else 0.
     seconds_per_window=measured_seconds/measured_windows if measured_windows else None
     pending=seconds_per_window*pending_windows if seconds_per_window is not None else None
-    done=[r for r in rows if rt.completed(a,r) is not None]
-    already=sum(rt.completed(a,r)['seconds'] for r in done)
+    already=sum(done['seconds'] for _,done in states if done is not None and done.get('whole_image_timing_complete',True))
     result=dict(status='partial_real_asset_estimate',Source_index_images=455,Target_index_images=8,
         calibration_images=66,evaluation_images=289,measured_full_images=len(measured),measured_windows=measured_windows,
-        index_build_seconds=index['seconds'],cold_index_load_seconds=smoke['cold_index_load_seconds'],
+        index_build_seconds=prepared,index_historical_build_seconds=index['seconds'],cold_index_load_seconds=smoke['cold_index_load_seconds'],
         measured_image_seconds=measured_seconds,seconds_per_window=seconds_per_window,pending_images=len(unfinished),
+        complete_wall_time_images=len(timed),warm_rate_images=len(warm),first_image_wall_seconds=timed[0]['seconds'] if timed else None,
+        interrupted_image_timing_unknown=len(timed)!=len(measured),backend=getattr(a,'backend','cpu'),
         pending_windows=pending_windows,already_completed_image_seconds=already,pending_pixel_seconds=pending,
-        projected_pixel_total_seconds=None if pending is None else index['seconds']+smoke['cold_index_load_seconds']+already+pending,
-        measured_compressed_bytes_per_window=sum(r['bytes'] for r in measured)/max(1,measured_windows),
-        pending_compressed_bytes=sum(r['bytes'] for r in measured)/max(1,measured_windows)*pending_windows,
-        unknown=['CPU_image_evaluation_and_report_IO','cross_image_matching_and_compression_variability'],
+        projected_pixel_total_seconds=None if pending is None else initialization+prepared+smoke['cold_index_load_seconds']+already+pending,
+        observed_initialization_and_check_seconds=initialization if check else None,
+        measured_compressed_bytes_per_window=sum(r['bytes'] for r in measured)/max(1,storage_windows),
+        pending_compressed_bytes=sum(r['bytes'] for r in measured)/max(1,storage_windows)*pending_windows,
+        unknown=['CPU_image_evaluation_and_report_IO','cross_image_matching_and_compression_variability','process_import_overhead_and_interrupted_session_history'],
         unknown_is_not_zero=True,scope='fixed four complete normal calibration images; no all-population speed guarantee',
         reused_completed_images_not_counted_pending=True)
     st.write_json(a.run_root/'cost_estimate.json',result);return result
@@ -68,6 +81,7 @@ def smoke_status(a,saved):
     return saved
 
 def smoke(a):
+    if getattr(a,'backend','cpu')=='cuda':rt.engine(a).verify()
     path=a.run_root/'smoke.json'
     if path.exists():
         old=st.sealed_json(path)

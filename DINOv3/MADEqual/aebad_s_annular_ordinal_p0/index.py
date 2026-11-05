@@ -8,7 +8,9 @@ from . import inputs as ip,pixels as px
 from .protocol import CONFIG,PAIRS,VARIANTS
 st=ip.st
 
-def index_root(a):return a.cache_root/'index_sharded_v1'
+def index_root(a):
+    if getattr(a,'backend','cpu')=='cuda':return Path(st.sealed_json(a.run_root/'index_reference.json')['manifest']).parent
+    return a.cache_root/'index_sharded_v1'
 
 def source_slices(rows):
     """cv::Mat continuity requires its scalar element count to fit signed int."""

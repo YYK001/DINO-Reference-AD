@@ -6,7 +6,7 @@ from importlib.metadata import version,PackageNotFoundError
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
-from .protocol import CONFIG,fixed
+from .protocol import CONFIG,fixed,execution
 from . import pixels as px
 from DINOv3.MADEqual.aebad_s_reference_residual_segmentation import storage as st
 from DINOv3.MADEqual.aebad_s_reference_residual_segmentation.inputs import validate_source
@@ -85,10 +85,14 @@ def assets(a):
     return a._assets
 
 def freeze(a,commit=True):
-    x=assets(a);value=dict(config=fixed(),assets=x.provenance(),pixel_contract=pixel_contract(),
+    x=assets(a);active=execution(a);config=dict(fixed(),index=active['retrieval'])
+    if active['backend']=='cuda':active=dict(active,torch_version=package('torch'))
+    value=dict(config=config,execution=active,assets=x.provenance(),pixel_contract=pixel_contract(),
         data=str(a.data),code={p.name:st.sha(p) for p in sorted(Path(__file__).parent.glob('*.py'))})
     value['identity']=st.digest(value)
-    st.sealed_json(a.run_root/'fixed_config.json',fixed())
+    st.sealed_json(a.run_root/'fixed_config.json',config)
+    if commit:st.sealed_json(a.run_root/'resolved_execution.json',active)
+    else:st.write_json(a.run_root/'preflight_execution.json',active)
     return st.sealed_json(a.run_root/'inputs.json',value) if commit else dict(value,seal=st.digest(value))
 
 def identity(a):
@@ -108,26 +112,48 @@ def preflight(a):
                     (available if present else missing).append(dict(role='original_RGB',image=rel,action='decode once when consumed' if present else 'restore original image'))
         except (OSError,ValueError) as e:missing.append(dict(role='original_RGB_dataset',path=str(a.data),reason=str(e)))
         backend=importlib.util.find_spec('cv2') is not None
-        if not backend:missing.append(dict(role='OpenCV_FLANN_LSH',action='locate available environment; no automatic installation'))
+        gpu=getattr(a,'backend','cpu')=='cuda'
+        if gpu:
+            if importlib.util.find_spec('torch') is None:missing.append(dict(role='PyTorch_CUDA_package',action='use existing isolated environment; no automatic installation'))
+        elif not backend:missing.append(dict(role='OpenCV_FLANN_LSH',action='locate available environment; no automatic installation'))
         source_rows=sum(sum(px.grid_spec((r['image_height'],r['image_width']),v)['count'] for v in range(9)) for r in x.source)
         target_rows=sum(sum(px.grid_spec((r['image_height'],r['image_width']),v)['count'] for v in range(9)) for r in x.target)
         window_counts={kind:sum(len(px.windows((r['image_height'],r['image_width']))) for r in rows) for kind,rows in (('calibration',x.calibration),('evaluation',x.evaluation))}
         gray_bytes=sum(r['image_height']*r['image_width']*4 for r in x.normal)
         new=[dict(role='original_gray_and_binary_index',images=463,Source_descriptors=source_rows,Target_descriptors=target_rows,
-            Source_native_shards=(source_rows+CONFIG['index']['source_shard_rows']-1)//CONFIG['index']['source_shard_rows'],
-            native_scalar_element_limit=2**31-1,
-            binary_bytes=(source_rows+target_rows)*16,gray_cache_bytes=gray_bytes,global_Source_copy_bytes=source_rows*16,
+            Source_native_shards=(source_rows+(a.index_shard_rows if gpu else CONFIG['index']['source_shard_rows'])-1)//(a.index_shard_rows if gpu else CONFIG['index']['source_shard_rows']),
+            native_scalar_element_limit=None if gpu else 2**31-1,
+            binary_bytes=(source_rows+target_rows)*16,gray_cache_bytes=gray_bytes,global_Source_copy_bytes=0 if gpu else source_rows*16,
             calibration_and_evaluation_gray_cache_bytes=sum(r['image_height']*r['image_width']*4 for r in x.calibration+x.evaluation),
-            native_LSH_RAM_and_saved_index_bytes='unmeasured; native data copies and hash-table entries additional'),
+            native_LSH_RAM_and_saved_index_bytes='not used by CUDA CSR backend' if gpu else 'unmeasured; native data copies and hash-table entries additional'),
             dict(role='full_image_annular_geometry_center_evidence',images=355,windows=window_counts,performance='unmeasured',
                 missing_masks_uncompressed_bytes=sum(window_counts.values())*3*24*64*64//8,
                 flip_counts_uncompressed_bytes=sum(window_counts.values())*3*64*64,
                 candidate_transforms_uncompressed_bytes=sum(window_counts.values())*3*12*6*8,
-                cache='compressed 64-window NPZ chunks; actual compression and native-index size must be measured'),
+                cache='lossless sparse default rows, ZIP_STORED, bounded async writer; size unmeasured' if gpu else 'compressed 64-window NPZ chunks; size unmeasured'),
             dict(role='image_evaluation',branches=7,metrics=2,new_pixel_jobs=0,new_AUPRO_jobs=0)]
         result=dict(status='missing_inputs' if missing else 'inputs_available',missing=len(missing),new_work=new,
             torch_imported='torch' in sys.modules,GPU_initialized=False,model_assets_required=False,
             time_estimate='unknown until index build and 4 full normal calibration images; no hours guarantee',pixel_audit='existing encoded PNG identity checked once on first decode; cached grayscale reused, no repeated array SHA sweep')
+        cached=dict(gray_compatible=0,descriptors_compatible=0,gray_absent=0,descriptors_absent=0,incompatible=[])
+        for row in x.normal:
+            for name in ('gray','descriptors'):
+                path=a.cache_root/name/key(row)/'manifest.json'
+                if not path.exists():cached[name+'_absent']+=1;continue
+                record=st.sealed_json(path);meta=record['metadata']
+                ok=meta.get('image')==image(row) and meta.get('pixel_contract')==pixel_contract()
+                if name=='descriptors':
+                    from .protocol import PAIRS,VARIANTS
+                    ok &= meta.get('pairs')==PAIRS.tolist() and meta.get('variants')==list(map(list,VARIANTS))
+                if ok:cached[name+'_compatible']+=1
+                else:cached['incompatible'].append(str(path))
+        result['reusable_pixel_assets']=cached;result['execution']=execution(a)
+        if gpu:
+            rows=source_rows+target_rows;shards=(source_rows+a.index_shard_rows-1)//a.index_shard_rows+8
+            result['GPU_index_theoretical_bytes']=dict(descriptors=rows*16,table_row_ids=rows*16,physical_ids=rows*4,bucket_offsets=shards*4*((1<<20)+1)*4,
+                image_cache_budget=int(a.image_cache_gib*2**30),workspace='additional dynamic tensors; real CUDA/RAM peak unmeasured')
+            result['cache_compatibility']=dict(original_gray_and_descriptors='readonly compatible; absent assets GPU-generated',CPU_LSH='preserved, not a GPU index',
+                old_matches_geometry_E='not reused across backends',P_and_manifests='reused unchanged')
     except (OSError,ValueError,KeyError) as e:
         missing.append(dict(role='metadata',reason=f'{type(e).__name__}: {e}'));result=dict(status='blocked',reason=str(e),torch_imported='torch' in sys.modules)
     st.write_csv(a.run_root/'asset_inventory.csv',available);st.write_csv(a.run_root/'missing_inputs.csv',missing);st.write_json(a.run_root/'new_work.json',new)

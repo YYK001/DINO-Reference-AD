@@ -103,28 +103,35 @@ def deduplicate(candidates,box):
         result.append(h)
     return result
 
-def freeze(info,matches,references,box):
-    """No query pixels, center residual, P, labels or GT are accepted here."""
-    stats=dict(hypotheses=0,degenerate=0,insufficient_same_image=0,geometry_unstable=0,outer_validation_rejected=0)
+def candidate_groups(matches,references):
     grouped={}
     for match in matches:
         ref=references[match['ref']];key=(ref['kind'],ref['instance_id'])
         grouped.setdefault(key,[]).append(match)
     source=[key for key in grouped if key[0]=='Source']
     source.sort(key=lambda k:(-len({m['anchor'] for m in grouped[k]}),np.mean([m['hamming'] for m in grouped[k]]),k[1]))
-    stats['source_image_budget_saturated']=len(source)>8
+    saturated=len(source)>8
     chosen=source[:8]+sorted(k for k in grouped if k[0]=='Target')[:8]
-    qualified=[]
+    result=[]
     for key in chosen:
         unique={}
         for m in sorted(grouped[key],key=lambda m:(m['hamming'],m['ref'],m['version'])):
             unique.setdefault((m['anchor'],*m['point']),m)
         group=list(unique.values());ref=references[min(m['ref'] for m in group)]
-        qualified.extend(fit_image(info,group,ref,box,stats))
-    source=deduplicate([h for h in qualified if h['kind']=='Source'],box)
-    both=deduplicate(qualified,box)
+        result.append((group,ref))
+    return result,saturated
+
+def assemble(qualified,box,stats,pools=None):
+    source,both=pools if pools is not None else (deduplicate([h for h in qualified if h['kind']=='Source'],box),deduplicate(qualified,box))
     def competing(pool):
         close=[h for h in pool if h['outer_cost']<=pool[0]['outer_cost']+.05] if pool else []
         return dict(candidates=close if len(close)<=12 else [],near_best_count=len(close),search_unresolved=len(close)>12)
     return dict(box=list(box),source=competing(source),multi=competing(both),single=dict(candidates=both[:1],search_unresolved=False),
         stats=stats,qualified=len(qualified),GT_used=False,query_center_used=False)
+
+def freeze(info,matches,references,box):
+    """No query pixels, center residual, P, labels or GT are accepted here."""
+    stats=dict(hypotheses=0,degenerate=0,insufficient_same_image=0,geometry_unstable=0,outer_validation_rejected=0)
+    groups,saturated=candidate_groups(matches,references);stats['source_image_budget_saturated']=saturated;qualified=[]
+    for group,ref in groups:qualified.extend(fit_image(info,group,ref,box,stats))
+    return assemble(qualified,box,stats)
